@@ -147,3 +147,9 @@ dmypy.json
 # Caches and Datasets
 cache/
 data/
+
+# for models
+models/
+debug/
+logs/
+imgs_debug/

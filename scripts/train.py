@@ -28,6 +28,8 @@ import torch.distributed as dist
 import yaml
 import wandb
 
+import sys
+sys.path.insert(0, ".")
 from prismatic.overwatch import initialize_overwatch
 from prismatic.util import set_global_seed
 from prismatic.vla import get_vla_dataset_and_collator

@@ -1,5 +1,5 @@
 """
-base_strategy_cogact.py
+base_strategy.py
 
 Abstract class definition of a (distributed) training strategy, with full annotations of class methods, utility
 functions, and initialization logic.
@@ -7,19 +7,16 @@ functions, and initialization logic.
 Training Strategies (DDP, FSDP-Grad, FSDP-Full) tend to have a lot of repeated components; this class does a lot of
 heavy lifting.
 """
-import torch  
-import torchvision.transforms.functional as TF
-import torch.distributed as dist
-import numpy as np  
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Callable, Optional, Union
+from typing import Callable, Optional
+
+import torch
+import torch.distributed as dist
+from torch.utils.data import DataLoader, Dataset, DistributedSampler, IterableDataset
 from tqdm import tqdm
 from transformers.modeling_outputs import CausalLMOutputWithPast
-from collections import OrderedDict
-from PIL import Image  
-from torch.utils.data import DataLoader, Dataset, DistributedSampler, IterableDataset
 
 from prismatic.models.vlms import PrismaticVLM
 from prismatic.overwatch import initialize_overwatch
@@ -27,19 +24,7 @@ from prismatic.training.metrics import Metrics, VLAMetrics
 from prismatic.util import check_bloat16_supported
 from prismatic.util.batching_utils import SplitModalitySampler
 from prismatic.util.data_utils import PaddedCollatorForActionPrediction, PaddedCollatorForLanguageModeling
-
-from vla import CogACT
-  
-@torch.no_grad()
-def update_ema(ema_model, model, decay=0.9999):
-    """
-    Step the EMA model towards the current model.
-    """
-    ema_params = OrderedDict(ema_model.named_parameters())
-    model_params = OrderedDict(model.named_parameters())
-    for name, param in model_params.items():
-        # TODO: Consider applying only to params that require_grad to avoid small numerical changes of pos_embed
-        ema_params[name].mul_(decay).add_(param.data, alpha=1 - decay)
+from prismatic.vla.action_tokenizer import ActionTokenizer
 
 # Initialize Overwatch =>> Wraps `logging.Logger`
 overwatch = initialize_overwatch(__name__)
@@ -49,7 +34,7 @@ overwatch = initialize_overwatch(__name__)
 class TrainingStrategy(ABC):
     def __init__(
         self,
-        vlm: Union[PrismaticVLM, CogACT],
+        vlm: PrismaticVLM,
         device_id: int,
         stage: str,
         epochs: int,
@@ -66,7 +51,6 @@ class TrainingStrategy(ABC):
         reduce_in_full_precision: bool = False,
         mixed_precision_dtype: torch.dtype = torch.bfloat16,
         worker_init_fn: Optional[Callable[[int], None]] = None,
-        repeated_diffusion_steps: int = 4,
         **_: str,
     ) -> None:
         self.vlm, self.device_id, self.stage = vlm, device_id, stage
@@ -87,7 +71,6 @@ class TrainingStrategy(ABC):
         self.enable_mixed_precision_training = enable_mixed_precision_training
         self.reduce_in_full_precision = reduce_in_full_precision
         self.mixed_precision_dtype = mixed_precision_dtype
-        self.repeated_diffusion_steps = repeated_diffusion_steps
 
         # DataLoader Parameters
         self.worker_init_fn = worker_init_fn
@@ -114,9 +97,6 @@ class TrainingStrategy(ABC):
         only_trainable: bool = True,
     ) -> None: ...
 
-    @abstractmethod
-    def load_optimizer_and_scheduler(self, checkpoint_path: str) -> None: ...
-    
     @abstractmethod
     def run_setup(self, run_dir: Path, n_train_examples: int) -> None: ...
 
@@ -201,17 +181,30 @@ class TrainingStrategy(ABC):
                         dtype=self.mixed_precision_dtype,
                         enabled=self.enable_mixed_precision_training,
                     ):
-                        loss, output = self.vlm(
+                        output: CausalLMOutputWithPast = self.vlm(
                             input_ids=batch["input_ids"],
                             attention_mask=batch["attention_mask"],
                             pixel_values=batch["pixel_values"],
                             labels=batch["labels"],
                             multimodal_indices=batch["multimodal_indices"],
-                            repeated_diffusion_steps = self.repeated_diffusion_steps
                         )
+                        loss = output.loss
 
                     # Commit Loss (Prior to Gradient Accumulation Normalization)
                     metrics.commit(loss=loss)
+
+                    # Normalize Loss to account for Gradient Accumulation --> Backward!
+                    # [IMPORTANT] Technically speaking, doing gradient accumulation in this way is "incorrect"; this is
+                    #             because in general, each batch has a *different number of masked out tokens* (because
+                    #             we're instruct-tuning). Taking the mean over two unbalanced means != the right thing!
+                    #
+                    #             HOWEVER -- at least at the 7B scale, the "naive" approach is just as performant as
+                    #             the "correct" implementation, without adding extra complexity.
+                    #
+                    # That being said =>> at the 13B scale, *no matter what we tried, ANY gradient accumulation is just
+                    #   really bad for downstream performance. Initial investigation shows that BF16 accumulation
+                    #   just really tanks in precision... and don't have a good/clean way to fix this. Would love for
+                    #   someone to PR and fix this (and I'd greatly appreciate it!!!)
                     normalized_loss = loss / self.grad_accumulation_steps
                     normalized_loss.backward()
 
@@ -253,14 +246,14 @@ class TrainingStrategy(ABC):
         self,
         vla_dataset: IterableDataset,
         collator: PaddedCollatorForActionPrediction,
+        action_tokenizer: ActionTokenizer,
         metrics: VLAMetrics,
         save_interval: int = 2500,
         save_full_model: bool = True,
-        action_model: bool = True,
     ) -> None:
         """Run the VLA training loop for the given `dataset` and `collator`; log losses, action metrics to `metrics`."""
         assert isinstance(vla_dataset, IterableDataset), "VLA training expects an IterableDataset!"
-        #assert self.grad_accumulation_steps == 1, "VLA training does not support gradient accumulation!"
+        assert self.grad_accumulation_steps == 1, "VLA training does not support gradient accumulation!"
 
         # Create a DataLoader =>> Set `num_workers` to 0; RLDS loader handles parallelism!
         dataloader = DataLoader(
@@ -275,7 +268,7 @@ class TrainingStrategy(ABC):
         # === Train ===
         status = metrics.get_status()
         with tqdm(
-            total=(self.epochs * (len(dataloader) // self.grad_accumulation_steps)) if self.max_steps is None else self.max_steps,
+            total=(self.epochs * len(dataloader)) if self.max_steps is None else self.max_steps,
             desc=status,
             leave=False,
             disable=not overwatch.is_rank_zero(),
@@ -283,73 +276,110 @@ class TrainingStrategy(ABC):
             self.vlm.train()
 
             # Zero Gradients (just in case)
-            if self.vlm.use_ema is not None and self.vlm.use_ema == True:
-                self.vlm.ema_diffusion.eval()
             self.optimizer.zero_grad()
 
             # [Contract] DataLoader wraps RLDS Loader (`.as_numpy_iterator() =>> implicit `.repeat()`)
             #   => This means looping over the DataLoader is basically "infinite" (so no outer loop over epochs).
             #      Slightly breaks default PyTorch semantics, which is why we adaptively compute `epoch` below.
-            for train_idx, batch in enumerate(dataloader):
+            for batch in dataloader:
                 # Note that we'll unpack batch (and let AMP/FSDP do its thing) in the VLM.forward() call
                 #   => Basically, if we're using mixed precision (or not), autocast()/FSDP will move to device!
                 with torch.autocast(
                     "cuda", dtype=self.mixed_precision_dtype, enabled=self.enable_mixed_precision_training
                 ):
-                    if action_model:
-                        loss, output = self.vlm(
-                            input_ids=batch["input_ids"],
-                            attention_mask=batch["attention_mask"],
-                            actions=batch["actions"],
-                            pixel_values=batch["pixel_values"],
-                            action_masks=batch["action_masks"],
-                            labels=batch["labels"],
-                            output_hidden_states = True,
-                            repeated_diffusion_steps = 8,
-                        )
-                    else:
-                        # [Contract] self.vlm.forward() must automatically compute `loss` and return!
-                        output: CausalLMOutputWithPast = self.vlm(
-                            input_ids=batch["input_ids"],
-                            attention_mask=batch["attention_mask"],
-                            pixel_values=batch["pixel_values"],
-                            labels=batch["labels"],
-                        )
-                        loss = output.loss
+                    # [Contract] self.vlm.forward() must automatically compute `loss` and return!
+                    output: CausalLMOutputWithPast = self.vlm(
+                        input_ids=batch["input_ids"],
+                        attention_mask=batch["attention_mask"],
+                        pixel_values=batch["pixel_values"],
+                        labels=batch["labels"],
+                    )
+                    loss = output.loss
 
                 # Commit Loss =>> Backward!
                 metrics.commit(loss=loss)
-                
-                normalized_loss = loss / self.grad_accumulation_steps
-                normalized_loss.backward()
+                loss.backward()
+
+                # === Compute Action Token Accuracy & L1 Loss ===
+
+                # To compute action token accuracy, we need to identify the locations of the action tokens
+                # in both `output.logits` and `batch["labels"]`. We know that when "right" padding, we
+                # insert `self.vlm.vision_backbone.num_patches` at index 1.
+                #
+                # Computing `action_prediction_accuracy` is then pretty straightforward:
+                #   1) Extract "aligned" predictions & labels
+                #   2) Compute boolean "mask" where "labels > 2" (where 2 is ID for `EOS_TOKEN`)
+                #           => If masking out EOS, then it's just "labels != -100 (IGNORE_INDEX)
+                #   3) Compute masked accuracy as `(preds == logits) & mask` --> sum/divide by # unmasked!
+                action_preds = output.logits[:, self.vlm.vision_backbone.num_patches : -1].argmax(dim=2)
+                action_gt = batch["labels"][:, 1:].to(action_preds.device)
+                mask = action_gt > action_tokenizer.action_token_begin_idx
+
+                # Compute Accuracy
+                correct_preds = (action_preds == action_gt) & mask
+                action_accuracy = correct_preds.sum().float() / mask.sum().float()
+
+                # Compute L1 Loss on Predicted (Continuous) Actions
+                continuous_actions_pred = torch.tensor(
+                    action_tokenizer.decode_token_ids_to_actions(action_preds[mask].cpu().numpy())
+                )
+                continuous_actions_gt = torch.tensor(
+                    action_tokenizer.decode_token_ids_to_actions(action_gt[mask].cpu().numpy())
+                )
+                action_l1_loss = torch.nn.functional.l1_loss(continuous_actions_pred, continuous_actions_gt)
+
+                # Commit Metrics
+                metrics.commit(action_accuracy=action_accuracy, l1_loss=action_l1_loss, update_step_time=True)
+
+                # Compute metrics per dataset --> only on rank_zero since we don't log them on other workers anyways
+                if overwatch.is_rank_zero():
+                    datasets = set(batch["dataset_names"])
+                    if len(datasets) > 1:
+                        for ds in datasets:
+                            ds_mask = torch.tensor([elem == ds for elem in batch["dataset_names"]])
+                            action_accuracy_ds = correct_preds[ds_mask].sum().float() / mask[ds_mask].sum().float()
+                            continuous_actions_pred_ds = torch.tensor(
+                                action_tokenizer.decode_token_ids_to_actions(
+                                    action_preds[ds_mask][mask[ds_mask]].cpu().numpy()
+                                )
+                            )
+                            continuous_actions_gt_ds = torch.tensor(
+                                action_tokenizer.decode_token_ids_to_actions(
+                                    action_gt[ds_mask][mask[ds_mask]].cpu().numpy()
+                                )
+                            )
+                            action_l1_loss_ds = torch.nn.functional.l1_loss(
+                                continuous_actions_pred_ds, continuous_actions_gt_ds
+                            )
+                            metrics.commit_for_dataset(
+                                dataset_name=ds.decode(), action_accuracy=action_accuracy_ds, l1_loss=action_l1_loss_ds
+                            )
 
                 # === Gradient Step ===
-                # Step =>> Only if Done w/ Gradient Accumulation
-                if (train_idx + 1) % self.grad_accumulation_steps == 0:
-                    # Clip Gradients --> this is custom, per-strategy because of DDP vs. FSDP locality-assumptions
-                    self.clip_grad_norm()
 
-                    # Optimizer & LR Scheduler Step
-                    self.optimizer.step()
-                    self.lr_scheduler.step()
-                    if self.vlm.use_ema is not None and self.vlm.use_ema == True:
-                        update_ema(self.vlm.ema_diffusion, self.vlm.action_model)
-                    self.optimizer.zero_grad()
-                    # Compute epoch value using number of completed gradient steps
-                    epoch = (metrics.global_step + 1) // (len(vla_dataset) // self.global_batch_size)
+                # Clip Gradients --> this is custom, per-strategy because of DDP vs. FSDP locality assumptions
+                self.clip_grad_norm()
 
-                    # Push Metrics
-                    metrics.commit(update_step_time=True, global_step=metrics.global_step + 1, epoch=epoch, lr=self.lr_scheduler.get_last_lr()[0])
-                    status = metrics.push()
+                # Optimizer & LR Scheduler Step
+                self.optimizer.step()
+                self.lr_scheduler.step()
+                self.optimizer.zero_grad()
 
-                    # Check for Save Interval or Max Steps & Save Checkpoint
-                    if (terminate := (self.max_steps is not None and metrics.global_step >= self.max_steps)) or (
-                        (metrics.global_step % save_interval) == 0
-                    ):
-                        self.save_checkpoint(
-                            metrics.run_dir, metrics.global_step, epoch, loss.item(), only_trainable=not save_full_model
-                        )
-                        dist.barrier()
+                # Compute epoch value using number of completed gradient steps
+                epoch = (metrics.global_step + 1) // (len(vla_dataset) // self.global_batch_size)
+
+                # Push Metrics
+                metrics.commit(global_step=metrics.global_step + 1, epoch=epoch, lr=self.lr_scheduler.get_last_lr()[0])
+                status = metrics.push()
+
+                # Check for Save Interval or Max Steps & Save Checkpoint
+                if (terminate := (self.max_steps is not None and metrics.global_step >= self.max_steps)) or (
+                    (metrics.global_step % save_interval) == 0
+                ):
+                    self.save_checkpoint(
+                        metrics.run_dir, metrics.global_step, epoch, loss.item(), only_trainable=not save_full_model
+                    )
+                    dist.barrier()
 
                     if terminate:
                         return

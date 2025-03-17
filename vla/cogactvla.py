@@ -19,6 +19,9 @@ from torch.nn.utils.rnn import pad_sequence
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers import LlamaTokenizerFast
 
+import sys
+if "." not in sys.path:
+    sys.path.insert(0, ".")
 from prismatic.models.backbones.llm import LLMBackbone
 from prismatic.models.backbones.llm.prompting import PromptBuilder
 from prismatic.models.backbones.vision import VisionBackbone
@@ -136,7 +139,8 @@ class CogACT(nn.Module):
         else:
             raise ValueError("No vision backbone found")
         
-        last_hidden = last_hidden[:, num_patch :]
+        # since using three input images, the num_patch should be 3 times the original 
+        last_hidden = last_hidden[:, num_patch * 3 :]
 
         # extract the cognition feature
         cumulative_sum = attention_mask.cumsum(dim=1)
@@ -294,14 +298,32 @@ class CogACT(nn.Module):
             raise ValueError(f"Unsupported `tokenizer` type = {type(tokenizer)}")
 
         # Preprocess Image
-        pixel_values = image_transform(image)
-        if isinstance(pixel_values, torch.Tensor):
-            pixel_values = pixel_values[None, ...].to(self.vlm.device)
-        elif isinstance(pixel_values, dict):
-            pixel_values = {k: v[None, ...].to(self.vlm.device) for k, v in pixel_values.items()}
+        image_scene, image_hand_left, image_hand_right = image["scene"], image["left"], image["right"]
+        pixel_values_scene = image_transform(image_scene)
+        if isinstance(pixel_values_scene, torch.Tensor):
+            pixel_values_scene = pixel_values_scene[None, ...].to(self.vlm.device)
+        elif isinstance(pixel_values_scene, dict):
+            pixel_values_scene = {k: v[None, ...].to(self.vlm.device) for k, v in pixel_values_scene.items()}
         else:
-            raise ValueError(f"Unsupported `pixel_values` type = {type(pixel_values)}")
+            raise ValueError(f"Unsupported `pixel_values` type = {type(pixel_values_scene)}")
+
+        pixel_values_left = image_transform(image_hand_left)
+        if isinstance(pixel_values_left, torch.Tensor):
+            pixel_values_left = pixel_values_left[None, ...].to(self.vlm.device)
+        elif isinstance(pixel_values_left, dict):
+            pixel_values_left = {k: v[None, ...].to(self.vlm.device) for k, v in pixel_values_left.items()}
+        else:
+            raise ValueError(f"Unsupported `pixel_values` type = {type(pixel_values_left)}")
         
+        pixel_values_right = image_transform(image_hand_right)
+        if isinstance(pixel_values_right, torch.Tensor):
+            pixel_values_right = pixel_values_right[None, ...].to(self.vlm.device)
+        elif isinstance(pixel_values_right, dict):
+            pixel_values_right = {k: v[None, ...].to(self.vlm.device) for k, v in pixel_values_right.items()}
+        else:
+            raise ValueError(f"Unsupported `pixel_values` type = {type(pixel_values_right)}")
+        pixel_values = {"scene" : pixel_values_scene, "left" : pixel_values_left, "right" : pixel_values_right}
+
         # Invoke super().generate --> taps into `GenerationMixin` which (redirects) to `forward()`
         autocast_dtype = self.vlm.llm_backbone.half_precision_dtype
 
@@ -377,7 +399,7 @@ class CogACT(nn.Module):
         mask = action_norm_stats.get("mask", np.ones_like(action_norm_stats["q01"], dtype=bool))
         action_high, action_low = np.array(action_norm_stats["q99"]), np.array(action_norm_stats["q01"])
         normalized_actions = np.clip(normalized_actions, -1, 1)
-        normalized_actions[:, 6] = np.where(normalized_actions[:, 6] < 0.5, 0, 1) 
+        normalized_actions[:, 6] = np.where(normalized_actions[:, 6] < 0.3, 0, 1) 
         actions = np.where(
             mask,
             0.5 * (normalized_actions + 1) * (action_high - action_low) + action_low,

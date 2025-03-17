@@ -91,33 +91,139 @@ class Exp_SigLIP_224px_Bridge(VLAConfig):
     train_strategy: str = "fsdp-full-shard"
 
 
-# === CogACT-VLA Pretraining Configs ===
-
+# = [8 GPU] SigLIP 224px Frozen Vision Backbone + Bridge =
 @dataclass
-class Exp_CogACT_OXE_Magic_Soup_Plus_Minus(Exp_SigLIP_224px_Bridge):
-    vla_id: str = "prism-dinosiglip-224px+oxe+diffusion"
+class Exp_FreezeVIT_SigLIP_224px_Bridge(Exp_SigLIP_224px_Bridge):
+    vla_id: str = "siglip-224px-icy+mx-bridge"
+    base_vlm: Union[str, Path] = "siglip-224px+7b"
+    freeze_vision_backbone: bool = True
+
+
+# = [8 GPU] Fast Iteration =>> DINO-SigLIP 224px + Bridge =
+@dataclass
+class Exp_DinoSigLIP_224px_Bridge(Exp_SigLIP_224px_Bridge):
+    vla_id: str = "prism-dinosiglip-224px+mx-bridge"
     base_vlm: Union[str, Path] = "prism-dinosiglip-224px+7b"
 
+    data_mix: str = "bridge"
+
+
+# = [64 GPU] SigLIP 224px + OXE Magic Soup =
+@dataclass
+class Exp_SigLIP_224px_OXE_Magic_Soup(Exp_SigLIP_224px_Bridge):
+    vla_id: str = "siglip-224px+mx-oxe-magic-soup"
+    base_vlm: Union[str, Path] = "siglip-224px+7b"
+
+    data_mix: str = "oxe_magic_soup"
+
+    expected_world_size: int = 64
+    global_batch_size: int = 2048
+    per_device_batch_size: int = 32
+
+
+# = [64 GPU] DINO-SigLIP 224px + OXE Magic Soup++ =
+@dataclass
+class Exp_DinoSigLIP_224px_OXE_Magic_Soup_Plus(Exp_SigLIP_224px_Bridge):
+    vla_id: str = "prism-dinosiglip-224px+mx-oxe-magic-soup-plus"
+    base_vlm: Union[str, Path] = "prism-dinosiglip-224px+7b"
+
+    # Note =>> We adopt two stages, training on a mixture including DROID for 70% of training, before resampling!
     # data_mix: str = "oxe_magic_soup_plus"
     data_mix: str = "oxe_magic_soup_plus_minus"
-    shuffle_buffer_size: int = 10_000
-    freeze_vision_backbone: bool = True
-    expected_world_size: int = 16
-    global_batch_size: int = 256
-    per_device_batch_size: int = 16
-    max_grad_norm: float = 1.0
-    learning_rate: float = 2e-5
 
-    epochs: int = 100
+    expected_world_size: int = 64
+    global_batch_size: int = 2048
+    per_device_batch_size: int = 32
+
+
+# === OpenVLA Fine-tuning Configurations ===
+
+
+# = [8 GPU] SigLIP 224px + T-DROID =
+@dataclass
+class Exp_SigLIP_224px_TDROID_CarrotInBowl(Exp_SigLIP_224px_Bridge):
+    vla_id: str = "siglip-224px+mx-tdroid_carrot_in_bowl"
+    base_vlm: Union[str, Path] = "siglip-224px+7b"
+
+    data_mix: str = "tdroid_carrot_in_bowl"
+
+
+@dataclass
+class Exp_SigLIP_224px_TDROID_PourCornInPot(Exp_SigLIP_224px_Bridge):
+    vla_id: str = "siglip-224px+mx-tdroid_pour_corn_in_pot"
+    base_vlm: Union[str, Path] = "siglip-224px+7b"
+
+    data_mix: str = "tdroid_pour_corn_in_pot"
+
+
+# = [8 GPU] SigLIP 224px + T-DROID -- Partial Finetuning =
+@dataclass
+class Exp_SigLIP_224px_Icy_TDROID_CarrotInBowl(Exp_SigLIP_224px_Bridge):
+    vla_id: str = "siglip-224px-icy+mx-tdroid_carrot_in_bowl"
+    base_vlm: Union[str, Path] = "siglip-224px+7b"
+    freeze_vision_backbone: bool = True
+    freeze_llm_backbone: bool = False
+
+    data_mix: str = "tdroid_carrot_in_bowl"
+
+
+@dataclass
+class Exp_SigLIP_224px_LastLayer_TDROID_CarrotInBowl(Exp_SigLIP_224px_Bridge):
+    vla_id: str = "siglip-224px-last_layer+mx-tdroid_carrot_in_bowl"
+    base_vlm: Union[str, Path] = "siglip-224px+7b"
+    freeze_vision_backbone: bool = True
+    freeze_llm_backbone: bool = True
+    unfreeze_last_llm_layer: bool = True
+
+    data_mix: str = "tdroid_carrot_in_bowl"
+
+
+@dataclass
+class Exp_SigLIP_224px_Sandwich_TDROID_CarrotInBowl(Exp_SigLIP_224px_Bridge):
+    vla_id: str = "siglip-224px-sandwich+mx-tdroid_carrot_in_bowl"
+    base_vlm: Union[str, Path] = "siglip-224px+7b"
+    freeze_vision_backbone: bool = False
+    freeze_llm_backbone: bool = True
+    unfreeze_last_llm_layer: bool = True
+
+    data_mix: str = "tdroid_carrot_in_bowl"
+
+
+# === [8 GPU] SigLIP 224px + FrankaWipe ===
+@dataclass
+class Exp_SigLIP_224px_Droid_Wipe(Exp_SigLIP_224px_Bridge):
+    vla_id: str = "siglip-224px+mx-droid_wipe"
+    base_vlm: Union[str, Path] = "siglip-224px+7b"
+
+    data_mix: str = "droid_wipe"
+
 
 # === Define a VLA Registry Enum for Reference & Validation ===
 @unique
 class VLARegistry(Enum):
     # Sanity Check Configurations =>> BridgeV2
     SIGLIP_224PX_MX_BRIDGE = Exp_SigLIP_224px_Bridge
+    DINOSIGLIP_224PX_MX_BRIDGE = Exp_DinoSigLIP_224px_Bridge
 
-    # === CogACT-VLA Pretraining Configs ===
-    EXP_COGACT_OXE_MAGIC_SOUP_PLUS_MINUS = Exp_CogACT_OXE_Magic_Soup_Plus_Minus
+    # SigLIP Frozen Backbone Experiment
+    FREEZE_SIGLIP_224PX_MX_BRIDGE = Exp_FreezeVIT_SigLIP_224px_Bridge
+
+    # [OpenVLA v0.1 7B] SigLIP 224px + OXE Magic Soup
+    SIGLIP_224PX_MX_OXE_MAGIC_SOUP = Exp_SigLIP_224px_OXE_Magic_Soup
+
+    # [OpenVLA 7B] DINO + SigLIP 224px + OXE Magic Soup++
+    DINOSIGLIP_224PX_MX_OXE_MAGIC_SOUP_PLUS = Exp_DinoSigLIP_224px_OXE_Magic_Soup_Plus
+
+    # === TDROID Fine-tuning Configs ===
+    SIGLIP_224PX_MX_TDROID_CARROT_IN_BOWL = Exp_SigLIP_224px_TDROID_CarrotInBowl
+    SIGLIP_224PX_MX_TDROID_POUR_CORN_IN_POT = Exp_SigLIP_224px_TDROID_PourCornInPot
+
+    SIGLIP_224PX_ICY_MX_TDROID_CARROT_IN_BOWL = Exp_SigLIP_224px_Icy_TDROID_CarrotInBowl
+    SIGLIP_224PX_LASTLAYER_MX_TDROID_CARROT_IN_BOWL = Exp_SigLIP_224px_LastLayer_TDROID_CarrotInBowl
+    SIGLIP_224PX_SANDWICH_MX_TDROID_CARROT_IN_BOWL = Exp_SigLIP_224px_Sandwich_TDROID_CarrotInBowl
+
+    # === DROID Fine-tuning Configs ===
+    SIGLIP_224PX_MX_DROID_WIPE = Exp_SigLIP_224px_Droid_Wipe
 
     @property
     def vla_id(self) -> str:
