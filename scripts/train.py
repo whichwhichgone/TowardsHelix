@@ -91,7 +91,7 @@ class TrainConfig:
     past_action_window_size: int = 0                                # Action history window size, not used now, set to be 0 
     action_model_type: str = 'DiT-B'                                # Action model type, chose from ['DiT-S', 'DiT-B', 'DiT-L']
     use_ema: bool = False                                           # EMA version of action model
-    action_dim: int = 7                                             # Dimension of action space
+    action_dim: int = 16                                            # Dimension of action space
 
     def __post_init__(self) -> None:
         """Lift optimization parameters from `self.vla` for ease of use =>> validate on `expected_world_size`"""

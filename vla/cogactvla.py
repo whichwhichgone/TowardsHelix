@@ -246,6 +246,8 @@ class CogACT(nn.Module):
                         )
 
         # Load ActionModel from Checkpoint
+        # for the dual arm training from a single arm checkpoint, comment out the loading, otherwise uncomment.
+        '''
         if "action_model" in model_state_dict:
             cogact.action_model.load_state_dict(model_state_dict["action_model"])
             if "ema_diffusion" in model_state_dict and use_ema:
@@ -254,6 +256,7 @@ class CogACT(nn.Module):
                 cogact.ema_diffusion.load_state_dict(model_state_dict["action_model"])
         else:
             overwatch.warning("No ActionModel found in the pretrained checkpoint. Initializing a new one.")
+        '''
         return cogact        
 
     @torch.inference_mode()

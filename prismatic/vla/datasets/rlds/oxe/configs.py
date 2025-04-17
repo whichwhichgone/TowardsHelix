@@ -37,6 +37,7 @@ class StateEncoding(IntEnum):
     POS_QUAT = 2            # EEF XYZ (3) + Quaternion (4) + Gripper Open/Close (1)
     JOINT = 3               # Joint Angles (7, <PAD> if fewer) + Gripper Open/Close (1)
     JOINT_BIMANUAL = 4      # Joint Angles (2 x [ Joint Angles (6) + Gripper Open/Close (1) ])
+    JOINT_BIMANUAL_AGIBOT = 5  # Joint Position (2 x [ Joint Position (7) + Gripper Open/Close (1) ])
     # fmt: on
 
 
@@ -47,6 +48,7 @@ class ActionEncoding(IntEnum):
     JOINT_POS = 2           # Joint Delta Position (7) + Gripper Open/Close (1)
     JOINT_POS_BIMANUAL = 3  # Joint Delta Position (2 x [ Joint Delta Position (6) + Gripper Open/Close (1) ])
     EEF_R6 = 4              # EEF Delta XYZ (3) + R6 (6) + Gripper Open/Close (1)
+    JOINT_BIMANUAL_AGIBOT = 5  # Joint Position (2 x [ Joint Position (7) + Gripper Open/Close (1) ])
     # fmt: on
 
 
@@ -662,5 +664,18 @@ OXE_DATASET_CONFIGS = {
         "state_obs_keys": ["state"],
         "state_encoding": StateEncoding.POS_QUAT,
         "action_encoding": ActionEncoding.EEF_POS,
+    },
+
+    ### Agibot alpha data by zhaowei
+    "agibot_1k": {
+        "image_obs_keys": {
+            "primary": "head_color",
+            "secondary": "hand_left_color",
+            "third": "hand_right_color",
+        },
+        "depth_obs_keys": {"primary": "head_depth", "secondary": None, "third": None},
+        "state_obs_keys": ["state"],
+        "state_encoding": StateEncoding.JOINT_BIMANUAL_AGIBOT,
+        "action_encoding": ActionEncoding.JOINT_BIMANUAL_AGIBOT,
     },
 }

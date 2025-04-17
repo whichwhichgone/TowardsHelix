@@ -4,13 +4,13 @@
 
 > **Note**: 整个模型构造训练数据的入口函数为`train.py`文中的`get_vla_dataset_and_collator`。在该函数中首先定义了`RLDSBatchTransform`和`PaddedCollatorForActionPrediction`两个数据类分别用于对最后喂入模型的数据进行统一格式化的处理和对齐数据长度。然后，该函数中同时定义了一个`RLDSDataset`类的实例来管理训练模型用到的所有数据。RLDSDataset继承自`tf.data.Dataset`，因此可以直接使用`tf.data.Dataset`的API来对数据进行处理。
 
-**Step 1**: 为了能够支持自己的训练数据（假定自己的数据已经转为了rlds的标准形式），需要修改对应的`OXE_DATASET_CONFIGS`字典，该字典中包含了所有的OXE数据集，以及每个数据集在训练时对应的数据格式。具体参照`make_oxe_dataset_kwargs`函数中需要的数据集的具体属性来进行修改，比如需要从源数据集中提取哪些相机的数据，哪些传感器的数据，哪些语言指令等以支持本模型的训练。
+**Step 1**: 首先需要修改`configs.py`文件中的`OXE_DATASET_CONFIGS`字典（假定自己的数据已经转为了rlds的标准形式），该字典中包含了所有的OXE数据集，以及每个数据集在训练时使用的各个字段的数据格式。`make_oxe_dataset_kwargs`函数将会使用该配置中定义的数据集字段来构造数据集相关的属性参数，并用于模型后续的训练。
 
-**Step 2**: 同时还要注意修改一些对数据集进行预处理转换的函数，参考`OXE_STANDARDIZATION_TRANSFORMS`定义的各个函数，比如`berkeley_autolab_ur5_dataset_transform`函数。以上两个地方对数据集进行的定义和修改是基于自己已经准备好的tensorflow dataset进行的，是`tf.data.dataset`层级的修改.
+**Step 2**: 同时还要注意修改一些对数据集进行预处理转换的函数，参考`OXE_STANDARDIZATION_TRANSFORMS`定义的各个函数，比如`berkeley_autolab_ur5_dataset_transform`函数。
+
+**Step 3**: 利用`make_dataset_from_rlds`函数来将事先准备好的rlds格式的数据集转换为**Step 1**中所期望的数据集格式。该函数在`make_interleaved_dataset`函数执行过程中被调用，转换之后的数据集中数据的格式为：
 
 > **Note**: `make_interleaved_dataset`是另外一个重要的数据构造函数，负责具体的项目中`RLDSDataset`类实例的构建。
-
-**Step 3**: `make_interleaved_dataset`调用`make_dataset_from_rlds`函数来从rlds的数据集中读取数据，然后将其转换为代码中定义的数据集格式。转换之后的数据集中数据的格式为：
 
 ```python
 {

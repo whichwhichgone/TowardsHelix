@@ -830,6 +830,41 @@ def dummy_data_ur5_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, An
     # placeholder code, can be implemented according yourself
     return trajectory
 
+def agibot_alpha_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+
+    # convert the raw RLDS dataset format to the target format
+    # the gripper action from agibot is already absolute, where 0 for full open and 1 for full close
+    gripper_action_left = trajectory["action"]["pos_ee"][:, 7:8]
+    gripper_action_right = trajectory["action"]["pos_ee"][:, 15:16]
+    joint_action_left = trajectory["action"]["joint_position"][:, :7]
+    joint_action_right = trajectory["action"]["joint_position"][:, 7:]
+
+    trajectory["action"] = tf.concat(
+        [
+            joint_action_left,
+            gripper_action_left,
+            joint_action_right,
+            gripper_action_right,
+        ],
+        axis=-1,
+    )
+
+    gripper_state_left = trajectory["state"]["pos_ee"][:, 7:8]
+    gripper_state_right = trajectory["state"]["pos_ee"][:, 15:16]
+    joint_state_left = trajectory["state"]["joint_position"][:, :7]
+    joint_state_right = trajectory["state"]["joint_position"][:, 7:]
+    robot_state = tf.concat(
+        [
+            joint_state_left,
+            gripper_state_left,
+            joint_state_right,
+            gripper_state_right,
+        ],
+        axis=-1,
+    )
+    trajectory["observation"]["state"] = robot_state
+    return trajectory
+
 # === Registry ===
 OXE_STANDARDIZATION_TRANSFORMS = {
     "bridge_oxe": bridge_oxe_dataset_transform,
@@ -907,4 +942,6 @@ OXE_STANDARDIZATION_TRANSFORMS = {
     "custom_finetuning": identity_transform,
     ### dummy data by zhaowei
     "dummy_data_ur5": dummy_data_ur5_dataset_transform,
+    ### agibot transform by zhaowei
+    "agibot_1k": agibot_alpha_transform,
 }
