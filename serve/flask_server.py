@@ -53,7 +53,7 @@ class VLAServer:
             actions, _ = self.vla.predict_action(
                 image_all,
                 instruction,
-                unnorm_key='dummy_data_ur5',
+                unnorm_key='ur5e_benchmark_v1',
                 cfg_scale=1.5,
                 use_ddim=True,
                 num_ddim_steps=10,
@@ -68,7 +68,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model-path",
         type=str,
-        default="/liujinxin/code/CogACT/logs/dummy_ur5_0316_total_moresteps--image_aug/checkpoints/step-012000-epoch-28-loss=0.0187.pt",
+        default="/liujinxin/code/CogACT/logs/ur5e_benchmark_v1_0511_2133--image_aug/checkpoints/step-020000-epoch-22-loss=0.0224.pt",
     )
     parser.add_argument(
         "--load-for-training",

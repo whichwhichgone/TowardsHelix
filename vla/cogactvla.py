@@ -140,7 +140,7 @@ class CogACT(nn.Module):
             raise ValueError("No vision backbone found")
         
         # since using three input images, the num_patch should be 3 times the original 
-        last_hidden = last_hidden[:, num_patch * 3 :]
+        last_hidden = last_hidden[:, num_patch :]
 
         # extract the cognition feature
         cumulative_sum = attention_mask.cumsum(dim=1)

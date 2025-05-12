@@ -663,4 +663,16 @@ OXE_DATASET_CONFIGS = {
         "state_encoding": StateEncoding.POS_QUAT,
         "action_encoding": ActionEncoding.EEF_POS,
     },
+
+    "ur5e_benchmark_v1": {
+        "image_obs_keys": {
+            "primary": "image",
+            "secondary": "hand_image_left",
+            "third": "hand_image_right",
+        },
+        "depth_obs_keys": {"primary": "depth", "secondary": None, "third": None},
+        "state_obs_keys": ["state"],
+        "state_encoding": StateEncoding.POS_QUAT,
+        "action_encoding": ActionEncoding.EEF_POS,
+    },
 }
