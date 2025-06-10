@@ -11,6 +11,29 @@ from typing import Dict, Optional, Union
 import tensorflow as tf
 
 
+def add_flexible_temporal_replacement(chunk_indices: tf.Tensor, replacement_prob: float = 0.3, max_offset: int = 1) -> tf.Tensor:
+    """
+    Randomly replaces some sliding windows in chunk_indices with sliding windows from previous positions.
+    
+    Args:
+        chunk_indices: Sliding windows with shape [traj_len, window_size]
+        replacement_prob: Probability of each window being replaced
+        max_offset: Maximum backward offset (1 means can only replace with the previous position)
+    
+    Returns:
+        Modified chunk_indices
+    """
+    traj_len, window_size = tf.shape(chunk_indices)[0], tf.shape(chunk_indices)[1]
+
+    random_mask = tf.random.uniform([traj_len, 1]) < replacement_prob    
+
+    # offsets: [1 ~ max_offset]
+    random_offsets = tf.random.uniform([traj_len, 1], minval=1, maxval=max_offset + 1, dtype=tf.int32)
+    replacement_indices = chunk_indices - random_offsets
+    modified_chunk_indices = tf.where(random_mask, replacement_indices, chunk_indices)    
+    return modified_chunk_indices
+
+
 def chunk_act_obs(traj: Dict, window_size: int, future_action_window_size: int = 0, dataset_statistics: Optional[Union[dict, str]] = None) -> Dict:
     """
     Chunks actions and observations into the given window_size.
@@ -40,6 +63,11 @@ def chunk_act_obs(traj: Dict, window_size: int, future_action_window_size: int =
         [traj_len, window_size + future_action_window_size],
     )
 
+    raw_chunk_indices = chunk_indices
+    asynchronous_training = False
+    if asynchronous_training:
+        chunk_indices = add_flexible_temporal_replacement(chunk_indices, replacement_prob=0.8, max_offset=8)
+    floored_raw_chunk_indices = tf.maximum(raw_chunk_indices, 0)
     floored_chunk_indices = tf.maximum(chunk_indices, 0)
 
     if "timestep" in traj["task"]:
@@ -49,11 +77,14 @@ def chunk_act_obs(traj: Dict, window_size: int, future_action_window_size: int =
 
     floored_action_chunk_indices = tf.minimum(tf.maximum(action_chunk_indices, 0), goal_timestep[:, None])
 
-    traj["observation"] = tf.nest.map_structure(lambda x: tf.gather(x, floored_chunk_indices), traj["observation"])
+    traj["asy_observation"] = tf.nest.map_structure(lambda x: tf.gather(x, floored_chunk_indices), traj["observation"])
+    traj["raw_observation"] = tf.nest.map_structure(lambda x: tf.gather(x, floored_raw_chunk_indices), traj["observation"])
+    del traj["observation"]
     traj["action"] = tf.gather(traj["action"], floored_action_chunk_indices)
 
     # indicates whether an entire observation is padding
-    traj["observation"]["pad_mask"] = chunk_indices >= 0
+    traj["asy_observation"]["pad_mask"] = chunk_indices >= 0
+    traj["raw_observation"]["pad_mask"] = raw_chunk_indices >= 0
 
     # if no absolute_action_mask was provided, assume all actions are relative
     if "absolute_action_mask" not in traj and future_action_window_size > 0:

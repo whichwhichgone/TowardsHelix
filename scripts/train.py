@@ -92,6 +92,7 @@ class TrainConfig:
     action_model_type: str = 'DiT-B'                                # Action model type, chose from ['DiT-S', 'DiT-B', 'DiT-L']
     use_ema: bool = False                                           # EMA version of action model
     action_dim: int = 7                                             # Dimension of action space
+    freeze_entire_vlm: bool = False
 
     def __post_init__(self) -> None:
         """Lift optimization parameters from `self.vla` for ease of use =>> validate on `expected_world_size`"""
@@ -158,6 +159,7 @@ def train(cfg: TrainConfig) -> None:
         # [Validate] Pretrained Checkpoint `step` and `epoch` should match `resume_step` and `resume_epoch`
         #   =>> Note :: We make developers pass in `resume_*` arguments as an extra sanity check!
         if cfg.is_resume:
+            cfg.pretrained_checkpoint = Path(cfg.pretrained_checkpoint)
             assert int(re.search("step-(.+?)-", cfg.pretrained_checkpoint.name).group(1)) == cfg.resume_step
             assert int(re.search("epoch-(.+?)-", cfg.pretrained_checkpoint.name).group(1)) == cfg.resume_epoch
         overwatch.info("Loading VLA Checkpoint")
@@ -192,24 +194,33 @@ def train(cfg: TrainConfig) -> None:
     for param in vla.parameters():
         assert param.dtype == torch.float32, f"Loaded VLM parameter not in full precision: {param}"
 
+    if cfg.freeze_entire_vlm:
+        overwatch.info("Explicitly freezing entire VLM model")
+        vla.vlm.requires_grad_(False)
+        vla.vlm.eval()
+
     # Determine training "stage" based on frozen vs unfrozen parameters --> supports different fine-tuning schemes!
-    if not cfg.vla.freeze_vision_backbone and not cfg.vla.freeze_llm_backbone:
-        stage = "full-finetune"  # Full fine-tuning
-    elif cfg.vla.freeze_vision_backbone and not cfg.vla.freeze_llm_backbone:
-        stage = "finetune"  # Frozen vision encoder
-    elif cfg.vla.freeze_vision_backbone and cfg.vla.freeze_llm_backbone:
-        stage = "align"  # Fine-tuning projector
-    elif not cfg.vla.freeze_vision_backbone and cfg.vla.freeze_llm_backbone and cfg.vla.unfreeze_last_llm_layer:
-        stage = "vla-sandwich-train"  # Fine-tuning vision encoder, projector, and LLM last layer
-    elif cfg.vla.freeze_vision_backbone and cfg.vla.freeze_llm_backbone and cfg.vla.unfreeze_last_llm_layer:
-        stage = "vla-last-layer-train"  # Fine-tuning LLM last layer only
+    if cfg.freeze_entire_vlm:
+        stage = "action-model-only"
+        overwatch.info("Setting stage to 'action-model-only': Freezing entire VLM, only training action model")
     else:
-        raise ValueError(
-            "Weight freezing configuration not supported. VLA config has the following parameters: "
-            f"freeze_vision_backbone: {cfg.vla.freeze_vision_backbone}"
-            f"freeze_llm_backbone: {cfg.vla.freeze_llm_backbone}"
-            f"unfreeze_last_llm_layer: {cfg.vla.unfreeze_last_llm_layer}"
-        )
+        if not cfg.vla.freeze_vision_backbone and not cfg.vla.freeze_llm_backbone:
+            stage = "full-finetune"  # Full fine-tuning
+        elif cfg.vla.freeze_vision_backbone and not cfg.vla.freeze_llm_backbone:
+            stage = "finetune"  # Frozen vision encoder
+        elif cfg.vla.freeze_vision_backbone and cfg.vla.freeze_llm_backbone:
+            stage = "align"  # Fine-tuning projector
+        elif not cfg.vla.freeze_vision_backbone and cfg.vla.freeze_llm_backbone and cfg.vla.unfreeze_last_llm_layer:
+            stage = "vla-sandwich-train"  # Fine-tuning vision encoder, projector, and LLM last layer
+        elif cfg.vla.freeze_vision_backbone and cfg.vla.freeze_llm_backbone and cfg.vla.unfreeze_last_llm_layer:
+            stage = "vla-last-layer-train"  # Fine-tuning LLM last layer only
+        else:
+            raise ValueError(
+                "Weight freezing configuration not supported. VLA config has the following parameters: "
+                f"freeze_vision_backbone: {cfg.vla.freeze_vision_backbone}"
+                f"freeze_llm_backbone: {cfg.vla.freeze_llm_backbone}"
+                f"unfreeze_last_llm_layer: {cfg.vla.unfreeze_last_llm_layer}"
+            )
 
     # [Explicit] Call to `freeze_backbones` here for clarity =>> will log exactly what is/is not frozen
     overwatch.info(f"Invoking `VLM.freeze_backbones()` for `{vla_id}` => Stage: `{stage}`")

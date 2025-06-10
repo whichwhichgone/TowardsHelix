@@ -46,19 +46,43 @@ class VLAServer:
             img_hand_left.save(Path("./imgs_debug") / "eval_img_hand_left.png")
             img_hand_right.save(Path("./imgs_debug") / "eval_img_hand_right.png")
         return image_all
+    
+    def generate_action_rtc(self, instruction, image_all, action_part_prev, action_exec_s, delay):
+        """
+        Generate action with real-time chunking flow policies.
 
-    def generate_action(self, instruction, image_all):
+        Args:
+            instruction (str): Task instruction string
+            image_all (dict): Dictionary containing scene and hand images
+                - scene (np.ndarray): Scene image, shape (224, 224, 3)
+                - left (np.ndarray): Left hand camera image, shape (224, 224, 3)
+                - right (np.ndarray): Right hand camera image, shape (224, 224, 3)
+            action_part_prev (list): Previous action sequence, shape (16, 7)
+            action_exec_s (str): Executed actions between previous inference and current inference
+            delay (str): Number of actions elapsed during the inference procedure 
+
+        Returns:
+            np.ndarray: Generated action sequence with shape (16, 7)
+        """
+
         with torch.inference_mode():
             self.vla.to('cuda:0').eval()
-            actions, _ = self.vla.predict_action(
+            if action_part_prev is not None:
+                action_part_prev = np.asarray(action_part_prev)
+                action_exec_s = int(action_exec_s)
+                delay = int(delay)
+
+            actions, _ = self.vla.predict_action_with_cfm(
                 image_all,
                 instruction,
-                unnorm_key='ur5e_benchmark_v3_with_depth',
+                unnorm_key='ur5e_benchmark_v4_with_depth',
                 cfg_scale=1.5,
                 use_ddim=True,
                 num_ddim_steps=10,
+                previous_actions=action_part_prev,
+                action_exec_s=action_exec_s,
+                delay=delay,
             )
-        
         # np.ndarray and its shape is (16, 7)
         return actions
 
@@ -68,7 +92,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model-path",
         type=str,
-        default="/liujinxin/code/CogACT_speedup/logs/ur5e_benchmark_v3_with_depth_asynchronous_0604_2226--image_aug/checkpoints/step-012000-epoch-13-loss=0.0216.pt",
+        default="/liujinxin/code/CogACT_speedup/logs/ur5e_benchmark_v4_with_depth_flowmatching_06191508_zw--image_aug/checkpoints/step-010000-epoch-17-loss=0.0876.pt",
     )
     parser.add_argument(
         "--load-for-training",
@@ -110,10 +134,13 @@ if __name__ == "__main__":
             content = request.files["json"].read()
             content = json.loads(content)
             instruction = content["instruction"]
+            action_part_prev = content["action_part_prev"]
+            action_exec_s = content["s"]
+            delay = content["delay"]
 
             # compose the input
             image_all = vla_robot.compose_input(img_scene, img_hand_left, img_hand_right, instruction)
-            action = vla_robot.generate_action(instruction, image_all)
+            action = vla_robot.generate_action_rtc(instruction, image_all, action_part_prev, action_exec_s, delay)
             return jsonify(action.tolist())
 
     # Run the server

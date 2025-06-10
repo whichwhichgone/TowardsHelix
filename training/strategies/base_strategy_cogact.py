@@ -306,6 +306,9 @@ class TrainingStrategy(ABC):
                             labels=batch["labels"],
                             output_hidden_states = True,
                             repeated_diffusion_steps = 8,
+                            state=batch["states"],
+                            images = batch["images"],
+                            depth=batch["depth"],
                         )
                     else:
                         # [Contract] self.vlm.forward() must automatically compute `loss` and return!

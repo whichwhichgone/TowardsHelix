@@ -22,6 +22,7 @@ from prismatic.vla.action_tokenizer import ActionTokenizer
 from prismatic.vla.datasets.rlds import make_interleaved_dataset, make_single_dataset
 from prismatic.vla.datasets.rlds.oxe import OXE_NAMED_MIXTURES, get_oxe_dataset_kwargs_and_weights
 from prismatic.vla.datasets.rlds.utils.data_utils import NormalizationType
+from torchvision import transforms
 
 # HuggingFace Default / LLaMa-2 IGNORE_INDEX (for labels)
 IGNORE_INDEX = -100
@@ -44,15 +45,38 @@ class RLDSBatchTransform:
         else:
             dataset_name, action = rlds_batch["dataset_name"], rlds_batch["action"][0]
 
-        img_scene = Image.fromarray(rlds_batch["observation"]["image_primary"][0])
-        img_left = Image.fromarray(rlds_batch["observation"]["image_secondary"][0])
-        img_right = Image.fromarray(rlds_batch["observation"]["image_third"][0])
+        img_scene = Image.fromarray(rlds_batch["asy_observation"]["image_primary"][0])
+        img_left = Image.fromarray(rlds_batch["asy_observation"]["image_secondary"][0])
+        img_right = Image.fromarray(rlds_batch["asy_observation"]["image_third"][0])
+
+        # The raw data always has no asychronous information
+        raw_scene = Image.fromarray(rlds_batch["raw_observation"]["image_primary"][0])
+        raw_left = Image.fromarray(rlds_batch["raw_observation"]["image_secondary"][0])
+        raw_right = Image.fromarray(rlds_batch["raw_observation"]["image_third"][0])
+        raw_depth = Image.fromarray(rlds_batch["raw_observation"]["depth_primary"][0])
+        raw_image = {
+            "scene" : transforms.ToTensor()(raw_scene),
+            "left" : transforms.ToTensor()(raw_left),
+            "right" : transforms.ToTensor()(raw_right),
+        }
+        raw_depth = transforms.ToTensor()(raw_depth)
+
+        # add states to batch
+        if rlds_batch["raw_observation"]["proprio"] is not None:
+            raw_proprio = rlds_batch["raw_observation"]["proprio"]
+            raw_proprio = torch.tensor(raw_proprio, dtype=torch.float32)
+        else:
+            raw_proprio = None
+
         if debug := False:
-            img_debug_path = Path("/liujinxin/code/CogACT/imgs_debug")
+            img_debug_path = Path("/liujinxin/code/CogACT_speedup/imgs_debug")
             img_debug_path.mkdir(parents=True, exist_ok=True)
             img_scene.save(img_debug_path / "train_img_scene.png")
             img_left.save(img_debug_path / "train_img_left.png")
             img_right.save(img_debug_path / "train_img_right.png")
+            raw_scene.save(img_debug_path / "train_raw_scene.png")
+            raw_left.save(img_debug_path / "train_raw_left.png")
+            raw_right.save(img_debug_path / "train_raw_right.png")
 
         lang = rlds_batch["task"]["language_instruction"].decode().lower()
 
@@ -107,7 +131,7 @@ class RLDSBatchTransform:
         if not self.predict_stop_token:
             labels[-1] = IGNORE_INDEX
 
-        return dict(pixel_values=pixel_values, input_ids=input_ids, labels=labels, dataset_name=dataset_name, actions=action, action_masks=action_mask)
+        return dict(pixel_values=pixel_values, input_ids=input_ids, labels=labels, dataset_name=dataset_name, actions=action, action_masks=action_mask, states=raw_proprio, images=raw_image, depth=raw_depth)
 
 
 class RLDSDataset(IterableDataset):
@@ -139,8 +163,8 @@ class RLDSDataset(IterableDataset):
             self.data_root_dir,
             mixture_spec,
             load_camera_views=("primary", "secondary", "third"),
-            load_depth=False,
-            load_proprio=False,
+            load_depth=True,
+            load_proprio=True,
             load_language=True,
             action_proprio_normalization_type=NormalizationType.BOUNDS_Q99,
         )

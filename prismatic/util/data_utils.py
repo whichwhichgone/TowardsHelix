@@ -104,6 +104,19 @@ class PaddedCollatorForActionPrediction:
         pixel_values_left = [instance["pixel_values"]["left"] for instance in instances]
         pixel_values_right = [instance["pixel_values"]["right"] for instance in instances]
 
+        # raw data for action model
+        states = [instance["states"] for instance in instances]
+        depth = [instance["depth"] for instance in instances]
+        states = torch.stack(states)
+        depth = torch.stack(depth)
+        image_scene = [instance["images"]["scene"] for instance in instances]
+        image_left = [instance["images"]["left"] for instance in instances]
+        image_right = [instance["images"]["right"] for instance in instances]
+        image_scene = torch.stack(image_scene)
+        image_left = torch.stack(image_left)
+        image_right = torch.stack(image_right)
+        images = dict(scene=image_scene, left=image_left, right=image_right)
+
         if "dataset_name" in instances[0]:
             dataset_names = [instance["dataset_name"] for instance in instances]
         else:
@@ -173,6 +186,9 @@ class PaddedCollatorForActionPrediction:
             labels=labels,
             actions=actions,
             action_masks=action_masks,
+            states=states,
+            images=images,
+            depth=depth,
         )
         if dataset_names is not None:
             output["dataset_names"] = dataset_names

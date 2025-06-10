@@ -830,6 +830,22 @@ def dummy_data_ur5_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, An
     # placeholder code, can be implemented according yourself
     return trajectory
 
+def ur5e_benchmark_v1_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    # placeholder code, can be implemented according yourself
+    return trajectory
+
+def ur5e_benchmark_v1_with_dp_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    # placeholder code, can be implemented according yourself
+    return trajectory
+
+def ur5e_benchmark_v3_with_depth_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    # placeholder code, can be implemented according yourself
+    return trajectory
+
+def ur5e_benchmark_v4_with_depth_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    # placeholder code, can be implemented according yourself
+    return trajectory
+
 # === Registry ===
 OXE_STANDARDIZATION_TRANSFORMS = {
     "bridge_oxe": bridge_oxe_dataset_transform,
@@ -907,4 +923,8 @@ OXE_STANDARDIZATION_TRANSFORMS = {
     "custom_finetuning": identity_transform,
     ### dummy data by zhaowei
     "dummy_data_ur5": dummy_data_ur5_dataset_transform,
+    "ur5e_benchmark_v1":ur5e_benchmark_v1_dataset_transform,
+    "ur5e_benchmark_v1_with_dp":ur5e_benchmark_v1_with_dp_dataset_transform,
+    "ur5e_benchmark_v3_with_depth":ur5e_benchmark_v3_with_depth_dataset_transform,
+    "ur5e_benchmark_v4_with_depth":ur5e_benchmark_v4_with_depth_dataset_transform,
 }

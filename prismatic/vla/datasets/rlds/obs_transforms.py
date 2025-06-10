@@ -88,6 +88,8 @@ def decode_and_resize(
                 depth = tf.zeros((*depth_resize_size.get(name, (1, 1)), 1), dtype=tf.float32)
             else:
                 depth = tf.io.decode_image(depth, channels=1, expand_animations=False, dtype=tf.float32)[..., 0]
+        elif depth.dtype == tf.uint8:
+            depth = tf.cast(depth, tf.float32) / 255.0
         elif depth.dtype != tf.float32:
             raise ValueError(f"Unsupported depth dtype: found depth_{name} with dtype {depth.dtype}")
 

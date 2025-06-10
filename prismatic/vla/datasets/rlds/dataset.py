@@ -405,14 +405,15 @@ def apply_frame_transforms(
     # it to the chunked "observation" dict as well as the non-chunked "task" dict
     def apply_obs_transform(fn: Callable[[Dict], Dict], frame: Dict) -> Dict:
         frame["task"] = fn(frame["task"])
-        frame["observation"] = dl.vmap(fn)(frame["observation"])
+        frame["asy_observation"] = dl.vmap(fn)(frame["asy_observation"])
+        frame["raw_observation"] = dl.vmap(fn)(frame["raw_observation"])
         return frame
 
     # Decode + resize images (and depth images)
     dataset = dataset.frame_map(
         partial(
             apply_obs_transform,
-            partial(obs_transforms.decode_and_resize, resize_size=resize_size, depth_resize_size=depth_resize_size),
+            partial(obs_transforms.decode_and_resize, resize_size=resize_size, depth_resize_size=resize_size),
         ),
         num_parallel_calls,
     )

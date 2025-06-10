@@ -11,7 +11,10 @@ from typing import Callable, Dict, List, Optional, Type, Union, Tuple
 from copy import deepcopy
 
 import torch
+import torchdiffeq
+import math
 import torch.nn as nn
+from torchvision import transforms
 import numpy as np
 from PIL import Image
 from torch.distributed.fsdp.wrap import _module_wrap_policy, _or_policy
@@ -32,6 +35,7 @@ from prismatic.util.nn_utils import FusedMLPProjector, LinearProjector, MLPProje
 
 from action_model.action_model import ActionModel
 from action_model.models import DiT
+from action_model.conditional_flow_matching import ConditionalFlowMatcher as CFM
 
 # Initialize Overwatch =>> Wraps `logging.Logger`
 overwatch = initialize_overwatch(__name__)
@@ -77,6 +81,7 @@ class CogACT(nn.Module):
         # Diffusion head is always trainable
         self._trainable_module_keys = ['action_model']
         self.norm_stats = norm_stats
+        self.using_cfm = True
 
     @property
     def trainable_module_keys(self) -> List[str]:
@@ -95,7 +100,17 @@ class CogACT(nn.Module):
         return self.vlm.vision_backbone
     
     def freeze_backbones(self, stage):
-        self.vlm.freeze_backbones(stage)
+        if stage == "action-model-only":
+            self.vlm.requires_grad_(False)
+            self.vlm.eval()
+            
+            self.action_model.requires_grad_(True)
+            self.action_model.train()
+
+            self._trainable_module_keys = ['action_model']            
+            overwatch.info("Freezing entire VLM model, only training action model")
+        else:
+            self.vlm.freeze_backbones(stage)
 
     def forward(
         self,
@@ -112,6 +127,9 @@ class CogACT(nn.Module):
         return_dict: Optional[bool] = None,
         repeated_diffusion_steps: int = 4,
         action_masks = None,
+        state = None,
+        images = None,
+        depth = None,
     ) -> Tuple:
         """Run a forward pass through the VLM, returning a CausalLMOutputWithPast instance (contains loss)."""
         
@@ -156,8 +174,11 @@ class CogACT(nn.Module):
         actions_history_repeated = actions_history.repeat(repeated_diffusion_steps, 1, 1)
         cognition_features_repeated = cognition_features.repeat(repeated_diffusion_steps, 1, 1) # [repeated_diffusion_steps*B, 1, D]
 
-        # Action model forward and compute loss
-        loss = self.action_model.loss(actions_repeated, cognition_features_repeated)
+        state_repeated = state.repeat(repeated_diffusion_steps, 1, 1) if state is not None else None
+        if self.using_cfm:
+            loss = self.action_model.cfm_loss(actions_repeated, cognition_features_repeated, state_repeated, images, depth)
+        else:
+            loss = self.action_model.loss(actions_repeated, cognition_features_repeated, state_repeated, images, depth)
         return loss, output
 
     def get_fsdp_wrapping_policy(self) -> Callable:
@@ -247,7 +268,13 @@ class CogACT(nn.Module):
 
         # Load ActionModel from Checkpoint
         if "action_model" in model_state_dict:
-            cogact.action_model.load_state_dict(model_state_dict["action_model"])
+            action_model_state_dict = model_state_dict['action_model']
+            try:
+                cogact.action_model.load_state_dict(action_model_state_dict)
+            except Exception as e:
+                overwatch.warning(f"Warning: Failed to load action_model state_dict: {e}")
+                overwatch.warning("Continuing with randomly initialized action model...")
+
             if "ema_diffusion" in model_state_dict and use_ema:
                 cogact.ema_diffusion.load_state_dict(model_state_dict["ema_diffusion"])
             elif use_ema:
@@ -264,7 +291,8 @@ class CogACT(nn.Module):
         cfg_scale: float = 1.5, 
         use_ddim: bool = False,
         num_ddim_steps: int = 5,
-        **kwargs: str
+        state: float = None,
+        **kwargs: str,
     ) -> np.ndarray:
         """
         Core function for VLA inference; maps input image and task instruction to continuous action.
@@ -350,6 +378,16 @@ class CogACT(nn.Module):
 
         cognition_features = cognition_features.unsqueeze(1).to(model_dtype)  # [B, 1, D]
 
+        # add vision for action model
+        image_scene = transforms.ToTensor()(np.array(image_scene)).unsqueeze(0).to(model_dtype).to(cognition_features.device)
+        image_hand_left = transforms.ToTensor()(np.array(image_hand_left)).unsqueeze(0).to(model_dtype).to(cognition_features.device)
+        image_hand_right = transforms.ToTensor()(np.array(image_hand_right)).unsqueeze(0).to(model_dtype).to(cognition_features.device)
+        p_scene = self.action_model.scene_encoder(image_scene).unsqueeze(1)
+        p_left = self.action_model.left_encoder(image_hand_left).unsqueeze(1)
+        p_right = self.action_model.right_encoder(image_hand_right).unsqueeze(1)
+        p = torch.cat([p_scene, p_left, p_right], dim=1)
+        cognition_features = torch.cat([p, cognition_features], dim=1)
+
         # Sample random noise
         noise = torch.randn(B, self.future_action_window_size+1, self.action_model.in_channels, device=cognition_features.device).to(model_dtype)  #[B, T, D]
     
@@ -358,7 +396,7 @@ class CogACT(nn.Module):
             noise = torch.cat([noise, noise], 0)
             uncondition = self.action_model.net.z_embedder.uncondition
             uncondition = uncondition.unsqueeze(0)  #[1, D]
-            uncondition = uncondition.expand(B, 1, -1) #[B, 1, D]
+            uncondition = uncondition.expand(cognition_features.shape[0], cognition_features.shape[1], -1) #[B, 1, D]
             z = torch.cat([cognition_features, uncondition], 0)
             cfg_scale = cfg_scale
             model_kwargs = dict(z=z, cfg_scale=cfg_scale)
@@ -407,6 +445,250 @@ class CogACT(nn.Module):
         )
 
         return actions, normalized_actions
+
+    @torch.inference_mode()
+    def predict_action_with_cfm(
+        self, image: Image, 
+        instruction: str, 
+        unnorm_key: Optional[str] = None, 
+        cfg_scale: float = 1.5, 
+        use_ddim: bool = False,
+        num_ddim_steps: int = 5,
+        state: float = None,
+        previous_actions: Optional[torch.FloatTensor] = None,
+        action_exec_s: Optional[int] = None,
+        delay: Optional[int] = None,
+        **kwargs: str,
+    ) -> np.ndarray:
+        """
+        Core function for VLA inference; maps input image and task instruction to continuous action.
+
+        @param image: PIL Image as [height, width, 3]
+        @param instruction: Task instruction string
+        @param unnorm_key: Optional dataset name for retrieving un-normalizing statistics; if None, checks that model
+                           was trained only on a single dataset, and retrieves those statistics.
+        @param cfg_scale: Scaling factor for classifier-free guidance (CFG); if == 1.0, CFG is disabled.
+        @param use_ddim: Use DDIM sampling instead of DDPM sampling.
+        @param num_ddim_steps: Number of DDIM steps to use for sampling.
+
+        @return Unnormalized (continuous) action vector --> end-effector deltas.
+        """
+        image_transform, tokenizer = self.vlm.vision_backbone.image_transform, self.vlm.llm_backbone.tokenizer
+
+        # Build VLA Prompt
+        prompt_builder = self.vlm.get_prompt_builder()
+        prompt_builder.add_turn(role="human", message=f"What action should the robot take to {instruction.lower()}?")
+        prompt_text = prompt_builder.get_prompt()
+
+        # Prepare Inputs
+        input_ids = tokenizer(prompt_text, truncation=True, return_tensors="pt").input_ids.to(self.vlm.device)
+        if isinstance(tokenizer, LlamaTokenizerFast):
+            # Note: We need to add this special empty token ('') after the colon (':') token in "ASSISTANT:"
+            #       insert it to match the inputs seen at training time. The empty token is at index 29871.
+            #       We also need to add the special cognition token at index 2 (i.e. the EOS token).
+            input_ids = torch.cat(
+                (input_ids, torch.unsqueeze(torch.Tensor([29871, 2]).long(), dim=0).to(self.vlm.device)), dim=1
+            )
+        else:
+            raise ValueError(f"Unsupported `tokenizer` type = {type(tokenizer)}")
+
+        # Preprocess Image
+        image_scene, image_hand_left, image_hand_right = image["scene"], image["left"], image["right"]
+        pixel_values_scene = image_transform(image_scene)
+        if isinstance(pixel_values_scene, torch.Tensor):
+            pixel_values_scene = pixel_values_scene[None, ...].to(self.vlm.device)
+        elif isinstance(pixel_values_scene, dict):
+            pixel_values_scene = {k: v[None, ...].to(self.vlm.device) for k, v in pixel_values_scene.items()}
+        else:
+            raise ValueError(f"Unsupported `pixel_values` type = {type(pixel_values_scene)}")
+
+        pixel_values_left = image_transform(image_hand_left)
+        if isinstance(pixel_values_left, torch.Tensor):
+            pixel_values_left = pixel_values_left[None, ...].to(self.vlm.device)
+        elif isinstance(pixel_values_left, dict):
+            pixel_values_left = {k: v[None, ...].to(self.vlm.device) for k, v in pixel_values_left.items()}
+        else:
+            raise ValueError(f"Unsupported `pixel_values` type = {type(pixel_values_left)}")
+        
+        pixel_values_right = image_transform(image_hand_right)
+        if isinstance(pixel_values_right, torch.Tensor):
+            pixel_values_right = pixel_values_right[None, ...].to(self.vlm.device)
+        elif isinstance(pixel_values_right, dict):
+            pixel_values_right = {k: v[None, ...].to(self.vlm.device) for k, v in pixel_values_right.items()}
+        else:
+            raise ValueError(f"Unsupported `pixel_values` type = {type(pixel_values_right)}")
+        pixel_values = {"scene" : pixel_values_scene, "left" : pixel_values_left, "right" : pixel_values_right}
+
+        # Invoke super().generate --> taps into `GenerationMixin` which (redirects) to `forward()`
+        autocast_dtype = self.vlm.llm_backbone.half_precision_dtype
+
+        # Generate cognition feature through vlm
+        with torch.autocast("cuda", dtype=autocast_dtype, enabled=self.vlm.enable_mixed_precision_training):
+            # fmt: off
+            output = super(PrismaticVLM, self.vlm).generate(
+                input_ids=input_ids,                            # Shape: [1, seq]
+                pixel_values=pixel_values,                      # Shape: [1, 3, res, res] or Dict[str, ...]
+                max_new_tokens=1,
+                output_hidden_states=True, 
+                return_dict_in_generate=True,
+                **kwargs
+            )
+            # fmt: on
+
+        # Extract cognition feature
+        cognition_features = output.hidden_states[0][-1][:,-1,:]
+        assert (cognition_features.shape[0], cognition_features.shape[1]) == (1,4096), "Batch size must be 1 for action prediction"
+
+        model_dtype = next(self.action_model.net.parameters()).dtype
+        B = cognition_features.shape[0]
+
+        cognition_features = cognition_features.unsqueeze(1).to(model_dtype)  # [B, 1, D]
+
+        # add vision for action model
+        image_scene = transforms.ToTensor()(np.array(image_scene)).unsqueeze(0).to(model_dtype).to(cognition_features.device)
+        image_hand_left = transforms.ToTensor()(np.array(image_hand_left)).unsqueeze(0).to(model_dtype).to(cognition_features.device)
+        image_hand_right = transforms.ToTensor()(np.array(image_hand_right)).unsqueeze(0).to(model_dtype).to(cognition_features.device)
+        p_scene = self.action_model.scene_encoder(image_scene).unsqueeze(1)
+        p_left = self.action_model.left_encoder(image_hand_left).unsqueeze(1)
+        p_right = self.action_model.right_encoder(image_hand_right).unsqueeze(1)
+        p = torch.cat([p_scene, p_left, p_right], dim=1)
+        cognition_features = torch.cat([p, cognition_features], dim=1)
+
+        model_kwargs = dict(z=cognition_features)
+        sample_fn = self.action_model.net.forward
+            
+        # guide inference of real-time chunking flow policies (rtc)
+        samples = self.guide_inference_rtc(sample_fn, model_kwargs['z'], previous_actions, action_exec_s, delay, num_ddim_steps, unnorm_key)
+        normalized_actions = samples[0].cpu().numpy()
+
+        # Un-normalize Actions        
+        action_norm_stats = self.get_action_stats(unnorm_key)
+        mask = action_norm_stats.get("mask", np.ones_like(action_norm_stats["q01"], dtype=bool))
+        action_high, action_low = np.array(action_norm_stats["q99"]), np.array(action_norm_stats["q01"])
+        normalized_actions = np.clip(normalized_actions, -1, 1)
+        normalized_actions[:, 6] = np.where(normalized_actions[:, 6] < 0.3, 0, 1) 
+        actions = np.where(
+            mask,
+            0.5 * (normalized_actions + 1) * (action_high - action_low) + action_low,
+            normalized_actions,
+        )
+
+        return actions, normalized_actions
+
+    def guide_inference_rtc(self, sample_fn, condition, previous_actions, action_exec_s, delay, num_ddim_steps, unnorm_key):
+        """Guide inference for real-time chunking flow policies.
+
+        Args:
+            sample_fn (Callable): Function that computes the vector field for the ODE solver
+            condition (torch.Tensor): Conditioning features from the vision-language model, shape (B, 1, D)
+            previous_actions (torch.Tensor): Previous action sequence, shape (16, 7)
+            action_exec_s (int): Number of executed actions between previous and current inference
+            delay (int): Number of actions elapsed during inference
+            num_ddim_steps (int): Number of steps for the ODE solver
+            unnorm_key (str): Key for action normalization statistics
+
+        Returns:
+            torch.Tensor: Generated action sequence samples, shape (16, 7)
+        """
+        if previous_actions is not None:
+            corrupt_mask = np.zeros_like(previous_actions, dtype=bool)
+            corrupt_mask[-action_exec_s:, :] = True
+            action_norm_stats = self.get_action_stats(unnorm_key)
+            mask = action_norm_stats.get("mask", np.ones_like(action_norm_stats["q01"], dtype=bool))
+            action_high, action_low = np.array(action_norm_stats["q99"]), np.array(action_norm_stats["q01"])
+
+            # get the normalized action
+            previous_actions = np.where(
+                mask,
+                (previous_actions - action_low) / (action_high - action_low) * 2 - 1,
+                previous_actions,
+            )
+            previous_actions = np.where(corrupt_mask, 0, previous_actions)
+            previous_actions = torch.Tensor(previous_actions).to(condition.device)
+            pse_gdm = partial(self.pse_gdm, target_action=previous_actions, action_exec_s=action_exec_s, delay=delay, vector_field=sample_fn)
+
+            # the guide inference sampling
+            samples = torchdiffeq.odeint(
+                lambda t, x: pse_gdm(x.squeeze(0), t, condition),
+                torch.randn(1, self.future_action_window_size+1, self.action_model.in_channels, device=condition.device),
+                torch.linspace(0, 1, num_ddim_steps, device=condition.device),
+                atol=1e-4,
+                rtol=1e-4,
+                method='dopri5',
+            )
+        else:
+            samples = torchdiffeq.odeint(
+                lambda t, x: sample_fn(x, t.view(1), condition),
+                torch.randn(1, self.future_action_window_size+1, self.action_model.in_channels, device=condition.device),
+                torch.linspace(0, 1, num_ddim_steps, device=condition.device),
+                atol=1e-4,
+                rtol=1e-4,
+                method='dopri5',
+            )
+
+        return samples[-1]
+
+    def pse_gdm(self, action, time_step, condition, target_action, action_exec_s, delay, vector_field):
+        """Guide inference with pseudo-guidance diffusion model.
+
+        Args:
+            action (torch.Tensor): Current action sequence, e.g. shape (16, 7)
+            time_step (float): Current simulation time step in [0, 1]
+            condition (torch.Tensor): Conditioning features from vision-language model, shape (1, 4, D) 
+            target_action (torch.Tensor): Target action sequence to guide towards, e.g. shape (16, 7)
+            action_exec_s (int): Number of executed actions between previous and current inference
+            delay (int): Number of actions elapsed during inference
+            vector_field (Callable): Function that computes the vector field for ODE solver
+
+        Returns:
+            torch.Tensor: Modified vector field incorporating guidance, same shape as input action
+        """
+        beta = 5                       # guidance strength parameter
+        masked_action = target_action  # target action is already the masked action where zeros are padded on the right side
+
+        # 0. Generate the soft mask, shape (16, 16)
+        horizon = masked_action.shape[0]
+        weights = torch.zeros(horizon, device=action.device)
+        for i in range(horizon):
+            if i < delay:
+                weights[i] = 1
+            elif delay <= i < horizon - action_exec_s:
+                c_i = (horizon - action_exec_s - i) / (horizon - action_exec_s - delay + 1)
+                weights[i] = c_i * (math.exp(c_i) - 1) / (math.exp(1) - 1)
+            else:
+                weights[i] = 0
+        weights = torch.diag(weights)
+        
+        # 1. Get the differenciation item of guidance inference
+        with torch.enable_grad():
+            action_flat = action.view(-1)
+            action_flat.requires_grad_(True)
+
+            def compute_action_1_est_flat(action_t_flat):
+                action_t = action_t_flat.view(action.shape)
+                result = action_t + (1 - time_step) * vector_field(action_t.unsqueeze(0), time_step.view(1), condition).squeeze(0)
+                return result.view(-1)
+            
+            # Compute jacobian matrix: (112, 112)
+            jacobian_matrix = torch.autograd.functional.jacobian(compute_action_1_est_flat, action_flat)
+        
+        vector_field_ans = vector_field(action.unsqueeze(0), time_step.view(1), condition).squeeze(0)
+        action_1_est = action + (1 - time_step) * vector_field_ans
+
+        # 2. Compute the bias item according to the formula
+        r_square = (1 - time_step) ** 2 / (time_step ** 2 + (1 - time_step) ** 2)
+        scaling_factor = min(beta, (1 - time_step) / (time_step * r_square + 1e-8))
+
+        y_flat = masked_action.view(-1)
+        action_1_est_flat = action_1_est.view(-1)
+        
+        # covert weights from (16, 16) to (112, 112)
+        weights_expanded = torch.kron(torch.eye(7, device=action.device), weights)
+        bias_flat = scaling_factor * (y_flat - action_1_est_flat) @ weights_expanded @ jacobian_matrix
+        bias = bias_flat.view(action.shape)
+
+        # 3. Compute the modified vector field
+        return (vector_field_ans + bias).unsqueeze(0)
 
     @torch.inference_mode()
     def predict_action_batch(
