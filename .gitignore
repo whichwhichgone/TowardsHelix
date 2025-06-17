@@ -149,7 +149,7 @@ cache/
 data/
 
 # for models
-models/
+/models/
 debug/
 logs/
 imgs_debug/
