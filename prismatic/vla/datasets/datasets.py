@@ -46,7 +46,7 @@ class RLDSBatchTransform:
 
         img_scene = Image.fromarray(rlds_batch["observation"]["image_primary"][0])
         img_left = Image.fromarray(rlds_batch["observation"]["image_secondary"][0])
-        img_right = Image.fromarray(rlds_batch["observation"]["image_third"][0])
+        img_right = Image.fromarray(rlds_batch["observation"]["image_wrist"][0])
         if debug := False:
             img_debug_path = Path("/liujinxin/code/CogACT/imgs_debug")
             img_debug_path.mkdir(parents=True, exist_ok=True)
@@ -138,7 +138,7 @@ class RLDSDataset(IterableDataset):
         per_dataset_kwargs, weights = get_oxe_dataset_kwargs_and_weights(
             self.data_root_dir,
             mixture_spec,
-            load_camera_views=("primary", "secondary", "third"),
+            load_camera_views=("primary", "secondary", "wrist"),
             load_depth=False,
             load_proprio=False,
             load_language=True,

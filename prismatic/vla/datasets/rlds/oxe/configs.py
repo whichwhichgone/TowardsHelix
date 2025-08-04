@@ -37,6 +37,7 @@ class StateEncoding(IntEnum):
     POS_QUAT = 2            # EEF XYZ (3) + Quaternion (4) + Gripper Open/Close (1)
     JOINT = 3               # Joint Angles (7, <PAD> if fewer) + Gripper Open/Close (1)
     JOINT_BIMANUAL = 4      # Joint Angles (2 x [ Joint Angles (6) + Gripper Open/Close (1) ])
+    JOINT_CALVIN = 5
     # fmt: on
 
 
@@ -664,13 +665,27 @@ OXE_DATASET_CONFIGS = {
         "action_encoding": ActionEncoding.EEF_POS,
     },
 
-    "ur5e_benchmark_v1": {
+    # for calvin dataset
+    "example_dataset": {
+        "image_obs_keys": {
+            "primary": "image",
+            "secondary": "wrist_image",
+            "wrist": "wrist_image",
+        },
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["state"],
+        "state_encoding": StateEncoding.JOINT_CALVIN,
+        "action_encoding": ActionEncoding.EEF_POS,
+    },
+
+    # for ur5e_benchmark_v0 dataset
+    "ur5e_benchmark_v0": {
         "image_obs_keys": {
             "primary": "image",
             "secondary": "hand_image_left",
-            "third": "hand_image_right",
+            "wrist": "hand_image_right",
         },
-        "depth_obs_keys": {"primary": "depth", "secondary": None, "third": None},
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
         "state_obs_keys": ["state"],
         "state_encoding": StateEncoding.POS_QUAT,
         "action_encoding": ActionEncoding.EEF_POS,

@@ -907,5 +907,6 @@ OXE_STANDARDIZATION_TRANSFORMS = {
     "custom_finetuning": identity_transform,
     ### dummy data by zhaowei
     "dummy_data_ur5": dummy_data_ur5_dataset_transform,
-    "ur5e_benchmark_v1": identity_transform,
+    "ur5e_benchmark_v0": identity_transform,
+    "example_dataset": identity_transform,
 }

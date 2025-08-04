@@ -247,7 +247,12 @@ class CogACT(nn.Module):
 
         # Load ActionModel from Checkpoint
         if "action_model" in model_state_dict:
-            cogact.action_model.load_state_dict(model_state_dict["action_model"])
+            try:
+                cogact.action_model.load_state_dict(model_state_dict["action_model"])
+                overwatch.info("Successfully loaded ActionModel weights from the pretrained checkpoint.")
+            except Exception as e:
+                overwatch.warning(f"Failed to load ActionModel weights: {e}. Initializing with random weights.")
+
             if "ema_diffusion" in model_state_dict and use_ema:
                 cogact.ema_diffusion.load_state_dict(model_state_dict["ema_diffusion"])
             elif use_ema:
