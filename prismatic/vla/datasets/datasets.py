@@ -8,6 +8,9 @@ format to OpenVLA, IterableDataset shim.
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Tuple, Type
+import random
+import io
+import re
 
 import numpy as np
 import torch
@@ -48,7 +51,7 @@ class RLDSBatchTransform:
         img_left = Image.fromarray(rlds_batch["observation"]["image_secondary"][0])
         img_right = Image.fromarray(rlds_batch["observation"]["image_wrist"][0])
         if debug := False:
-            img_debug_path = Path("/liujinxin/code/CogACT/imgs_debug")
+            img_debug_path = Path("/liujinxin/zhaowei/CogACT/imgs_debug")
             img_debug_path.mkdir(parents=True, exist_ok=True)
             img_scene.save(img_debug_path / "train_img_scene.png")
             img_left.save(img_debug_path / "train_img_left.png")
@@ -109,6 +112,137 @@ class RLDSBatchTransform:
 
         return dict(pixel_values=pixel_values, input_ids=input_ids, labels=labels, dataset_name=dataset_name, actions=action, action_masks=action_mask)
 
+@dataclass
+class RLDSBatchTransformOe(RLDSBatchTransform):
+
+    def __post_init__(self):
+        special_tokens = {"additional_special_tokens": ["<oe>"]}
+        num_added = self.base_tokenizer.add_special_tokens(special_tokens)
+        if num_added > 0:
+            print(f"Added {num_added} special tokens to the tokenizer: {special_tokens['additional_special_tokens']}")
+
+    def decode_utils(self, byte_utils):
+        img_utils = []
+        if byte_utils.size != 0:
+            for idx, img_util in enumerate(byte_utils):
+                img_bytes = Image.open(io.BytesIO(img_util))
+                if img_bytes.mode != 'RGB':
+                    img_bytes = img_bytes.convert('RGB')
+                if debug := True:
+                    utils_debug_path = Path("/liujinxin/zhaowei/CogACT/imgs_debug")
+                    utils_debug_path.mkdir(parents=True, exist_ok=True)
+                    img_bytes.save(utils_debug_path / f"img_utils_{idx}.png")
+
+                img_utils.append(img_bytes)
+        else:
+            # add a fake image placeholder for supporting fsdp
+            random_array = np.random.randint(0, 256, (224, 224, 3), dtype=np.uint8)
+            random_image = Image.fromarray(random_array)
+            img_utils.append(random_image)
+        return img_utils
+
+    def get_oe_lang(self, rlds_batch):
+        """Get the unified language instructions for oe-vla models."""
+        mm_type = rlds_batch["mm_task"]["task_type"].decode().lower()
+        mm_instruction = rlds_batch["mm_task"]["mm_instruction"].decode().lower()
+        mm_utils = rlds_batch["mm_task"]["mm_utils"]
+        mm_utils = self.decode_utils(mm_utils)
+
+        def replace_all_placeholders(mm_instruction, replacement="<oe>"):
+            pattern = r"<[^>]+>"
+            return re.sub(pattern, replacement, mm_instruction)
+
+        if mm_type == "object" and len(mm_utils) != 0:
+            oe_lang = replace_all_placeholders(mm_instruction, replacement="<oe>")
+        elif mm_type == "ocr":
+            oe_lang = "follow the command in <oe>"
+        elif mm_type == "vgr":
+            oe_lang = "reach the goal state <oe>"
+        elif mm_type == "vdl":
+            oe_lang = "learn the video demo: <oe>,<oe>,<oe>,<oe>"
+        elif mm_type == "plain" or (mm_type == "object" and len(mm_utils) == 0):
+            oe_lang = rlds_batch["task"]["language_instruction"].decode().lower()
+        else:
+            raise ValueError(f"Not support mm_type {mm_type} in oe-vla models")
+
+        return oe_lang, mm_utils
+
+    def __call__(self, rlds_batch: Dict[str, Any]) -> Dict[str, Any]:
+        """Converts a RLDS batch to the format expected by the OpenVLA collator/models."""
+
+        # For future action predictions
+        if rlds_batch["action"].shape[0] > 1:
+            dataset_name, action = rlds_batch["dataset_name"], rlds_batch["action"]
+        else:
+            dataset_name, action = rlds_batch["dataset_name"], rlds_batch["action"][0]
+
+        img_scene = Image.fromarray(rlds_batch["observation"]["image_primary"][0])
+        img_left = Image.fromarray(rlds_batch["observation"]["image_secondary"][0])
+        img_right = Image.fromarray(rlds_batch["observation"]["image_wrist"][0])
+
+        if debug := False:
+            img_debug_path = Path("/liujinxin/zhaowei/CogACT/imgs_debug")
+            img_debug_path.mkdir(parents=True, exist_ok=True)
+            img_scene.save(img_debug_path / "train_img_scene.png")
+            img_left.save(img_debug_path / "train_img_left.png")
+            img_right.save(img_debug_path / "train_img_right.png")
+
+        # Construct Chat-based Prompt
+        prompt_builder = self.prompt_builder_fn("openvla")
+
+        oe_lang, mm_utils = self.get_oe_lang(rlds_batch)
+        pixel_utils = [self.image_transform(util) for util in mm_utils]
+
+        # If action tokenizer is not used, we don't add the action to the chat answer
+        if self.action_tokenizer is None:
+            conversation = [
+                {"from": "human", "value": f"What action should the robot take to {oe_lang}?"},
+                {"from": "gpt", "value": ""},
+            ]
+        else:
+            # Construct Chat-based Prompt =>> Input is default query + language instruction, output are the action tokens
+            conversation = [
+                {"from": "human", "value": f"What action should the robot take to {oe_lang}?"},
+                {"from": "gpt", "value": self.action_tokenizer(action)},
+            ]
+
+        for turn in conversation:
+            prompt_builder.add_turn(turn["from"], turn["value"])
+
+        # Tokenize (w/ `base_tokenizer`)
+        input_ids = self.base_tokenizer(prompt_builder.get_prompt(), add_special_tokens=True).input_ids
+        labels = list(input_ids)
+
+        # Tensorize =>> Run Image Transform to get `pixel_values` =>> Return
+        #   =>> IMPORTANT :: IF WE'RE USING HF LLM.forward(..., labels=labels), SHIFTING HAPPENS _INSIDE_ MODEL!
+        input_ids, labels = torch.tensor(input_ids), torch.tensor(labels)
+        pixel_values_scene = self.image_transform(img_scene)
+        pixel_values_left = self.image_transform(img_left)
+        pixel_values_right = self.image_transform(img_right)
+        pixel_values = {
+            "scene" : pixel_values_scene,
+            "left" : pixel_values_left,
+            "right" : pixel_values_right,
+        }
+
+        # Add future actions to batch
+        if rlds_batch["action"].shape[0] > 1:
+            action = torch.tensor(action, dtype=torch.float32)
+            action_mask = None
+            if "action_mask" in rlds_batch:
+                action_mask = torch.tensor(rlds_batch["action_mask"], dtype=torch.bool)
+
+        if self.action_tokenizer is None:
+            labels[: -1] = IGNORE_INDEX
+        else:
+            # [CRITICAL] We do not want to take the loss for anything but the predicted action tokens!
+            labels[: -(len(action) + 1)] = IGNORE_INDEX
+
+        if not self.predict_stop_token:
+            labels[-1] = IGNORE_INDEX
+
+        return dict(pixel_values=pixel_values, pixel_utils=pixel_utils, input_ids=input_ids, labels=labels, dataset_name=dataset_name, actions=action, action_masks=action_mask)
+
 
 class RLDSDataset(IterableDataset):
     def __init__(
@@ -133,6 +267,7 @@ class RLDSDataset(IterableDataset):
         else:
             # Assume that passed "mixture" name is actually a single dataset -- create single-dataset "mix"
             mixture_spec = [(self.data_mix, 1.0)]
+        random.shuffle(mixture_spec)  # Shuffle to more diverse dataset across distributed processes
 
         # fmt: off
         per_dataset_kwargs, weights = get_oxe_dataset_kwargs_and_weights(
@@ -140,8 +275,9 @@ class RLDSDataset(IterableDataset):
             mixture_spec,
             load_camera_views=("primary", "secondary", "wrist"),
             load_depth=False,
-            load_proprio=False,
+            load_proprio=True,
             load_language=True,
+            load_oe_prompt=True,
             action_proprio_normalization_type=NormalizationType.BOUNDS_Q99,
         )
         rlds_config = dict(

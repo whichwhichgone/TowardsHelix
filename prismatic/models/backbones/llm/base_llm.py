@@ -117,7 +117,7 @@ class HFCausalLLMBackbone(LLMBackbone, ABC):
 
         # load local model added by zhaowei
         local_dict = {
-            "meta-llama/Llama-2-7b-hf": '/liujinxin/code/CogACT/models/Llama-2-7b-hf',
+            "meta-llama/Llama-2-7b-hf": '/zhaowei/workspace/CogACT/models/Llama-2-7b-hf',
         }
         hf_hub_path = local_dict[hf_hub_path]
 

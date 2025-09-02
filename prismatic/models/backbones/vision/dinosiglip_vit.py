@@ -48,8 +48,8 @@ class DinoSigLIPViTBackbone(VisionBackbone):
 
         # for local models --- by zhaowei
         local_dict = {
-            "vit_large_patch14_reg4_dinov2.lvd142m": "/liujinxin/code/CogACT/models/vit_large_patch14_reg4_dinov2.lvd142m/pytorch_model.bin",
-            "vit_so400m_patch14_siglip_224": "/liujinxin/code/CogACT/models/ViT-SO400M-14-SigLIP/open_clip_pytorch_model.bin",
+            "vit_large_patch14_reg4_dinov2.lvd142m": "/zhaowei/workspace/CogACT/models/vit_large_patch14_reg4_dinov2.lvd142m/pytorch_model.bin",
+            "vit_so400m_patch14_siglip_224": "/zhaowei/workspace/CogACT/models/ViT-SO400M-14-SigLIP/open_clip_pytorch_model.bin",
         }
         dino_timm_path = local_dict[self.dino_timm_path_or_url]
         siglip_timm_path = local_dict[self.siglip_timm_path_or_url]

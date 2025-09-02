@@ -37,7 +37,7 @@ class StateEncoding(IntEnum):
     POS_QUAT = 2            # EEF XYZ (3) + Quaternion (4) + Gripper Open/Close (1)
     JOINT = 3               # Joint Angles (7, <PAD> if fewer) + Gripper Open/Close (1)
     JOINT_BIMANUAL = 4      # Joint Angles (2 x [ Joint Angles (6) + Gripper Open/Close (1) ])
-    JOINT_CALVIN = 5
+    JOINT_CALVIN = 5        # 15 parameters
     # fmt: on
 
 
@@ -667,6 +667,19 @@ OXE_DATASET_CONFIGS = {
 
     # for calvin dataset
     "example_dataset": {
+        "image_obs_keys": {
+            "primary": "image",
+            "secondary": "wrist_image",
+            "wrist": "wrist_image",
+        },
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["state"],
+        "state_encoding": StateEncoding.JOINT_CALVIN,
+        "action_encoding": ActionEncoding.EEF_POS,
+    },
+
+    # for calvin_abc2d_oe dataset
+    "calvin_abc2d_oe": {
         "image_obs_keys": {
             "primary": "image",
             "secondary": "wrist_image",

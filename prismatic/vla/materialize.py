@@ -13,9 +13,9 @@ from transformers import PreTrainedTokenizerBase
 
 from prismatic.models.backbones.llm.prompting import PromptBuilder
 from prismatic.models.backbones.vision import ImageTransform
-from prismatic.util.data_utils import PaddedCollatorForActionPrediction
+from prismatic.util.data_utils import PaddedCollatorForActionPrediction, PaddedCollatorForActionPredictionOe
 from prismatic.vla.action_tokenizer import ActionTokenizer
-from prismatic.vla.datasets import EpisodicRLDSDataset, RLDSBatchTransform, RLDSDataset
+from prismatic.vla.datasets import EpisodicRLDSDataset, RLDSBatchTransform, RLDSBatchTransformOe, RLDSDataset
 
 
 def get_vla_dataset_and_collator(
@@ -42,10 +42,10 @@ def get_vla_dataset_and_collator(
     else:
         action_tokenizer = ActionTokenizer(base_action_tokenizer)
     # action_tokenizer = ActionTokenizer(tokenizer)
-    batch_transform = RLDSBatchTransform(
+    batch_transform = RLDSBatchTransformOe(
         action_tokenizer, tokenizer, image_transform, prompt_builder_fn, predict_stop_token=predict_stop_token
     )
-    collator = PaddedCollatorForActionPrediction(
+    collator = PaddedCollatorForActionPredictionOe(
         tokenizer.model_max_length, tokenizer.pad_token_id, padding_side=padding_side
     )
 

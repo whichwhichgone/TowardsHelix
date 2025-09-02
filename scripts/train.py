@@ -139,7 +139,7 @@ def train(cfg: TrainConfig) -> None:
     # Start =>> Build Directories and Set Randomness
     overwatch.info('"Do or do not; there is no try."', ctx_level=1)
     hf_token = cfg.hf_token.read_text().strip() if isinstance(cfg.hf_token, Path) else os.environ[cfg.hf_token]
-    worker_init_fn = set_global_seed(cfg.seed, get_worker_init_fn=True)
+    worker_init_fn = set_global_seed(cfg.seed + dist.get_rank(), get_worker_init_fn=True)
     os.makedirs(run_dir := (cfg.run_root_dir / cfg.run_id), exist_ok=True)
     os.makedirs(cfg.run_root_dir / cfg.run_id / "checkpoints", exist_ok=True)
 
@@ -244,6 +244,7 @@ def train(cfg: TrainConfig) -> None:
     dist.barrier()
     # Create Train Strategy
     overwatch.info(f"Initializing Train Strategy `{cfg.train_strategy}`")
+    vla.llm_backbone.llm.resize_token_embeddings(len(vla.llm_backbone.get_tokenizer()))
     train_strategy = get_train_strategy(
         train_strategy=cfg.train_strategy,
         vlm=vla,

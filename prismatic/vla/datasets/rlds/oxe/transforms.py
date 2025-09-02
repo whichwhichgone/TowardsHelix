@@ -909,4 +909,5 @@ OXE_STANDARDIZATION_TRANSFORMS = {
     "dummy_data_ur5": dummy_data_ur5_dataset_transform,
     "ur5e_benchmark_v0": identity_transform,
     "example_dataset": identity_transform,
+    "calvin_abc2d_oe": identity_transform,
 }

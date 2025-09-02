@@ -25,6 +25,7 @@ def make_oxe_dataset_kwargs(
     load_depth: bool = False,
     load_proprio: bool = True,
     load_language: bool = True,
+    load_oe_prompt: bool = True,
     action_proprio_normalization_type: NormalizationType = NormalizationType.NORMAL,
 ) -> Dict[str, Any]:
     """Generates config (kwargs) for given dataset from Open-X Embodiment."""
@@ -65,6 +66,11 @@ def make_oxe_dataset_kwargs(
     # Load Language
     if load_language:
         dataset_kwargs["language_key"] = "language_instruction"
+    
+    if load_oe_prompt:
+        dataset_kwargs["mm_task_key"] = "task_type"
+        dataset_kwargs["mm_prompt_key"] = "mm_instruction"
+        dataset_kwargs["mm_utils_key"] = "mm_utils"
 
     # Specify Standardization Transform
     dataset_kwargs["standardize_fn"] = OXE_STANDARDIZATION_TRANSFORMS[dataset_name]
@@ -83,6 +89,7 @@ def get_oxe_dataset_kwargs_and_weights(
     load_depth: bool = False,
     load_proprio: bool = True,
     load_language: bool = True,
+    load_oe_prompt: bool = True,
     action_proprio_normalization_type: NormalizationType = NormalizationType.NORMAL,
 ) -> Tuple[Dict[str, Any], List[float]]:
     """
@@ -120,6 +127,7 @@ def get_oxe_dataset_kwargs_and_weights(
                     load_depth,
                     load_proprio,
                     load_language,
+                    load_oe_prompt,
                     action_proprio_normalization_type,
                 )
             )
