@@ -102,6 +102,7 @@ class CogACT(nn.Module):
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         pixel_values: Optional[torch.FloatTensor] = None,
+        pixel_utils: Optional[Dict[str, torch.Tensor]] = None,
         labels: Optional[torch.LongTensor] = None,
         actions: Optional[torch.FloatTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
@@ -119,6 +120,7 @@ class CogACT(nn.Module):
             input_ids=input_ids,
             attention_mask=attention_mask,
             pixel_values=pixel_values,
+            pixel_utils=pixel_utils,
             labels=labels,
             inputs_embeds=inputs_embeds,
             past_key_values=past_key_values,
@@ -130,6 +132,7 @@ class CogACT(nn.Module):
 
         # extract the last hidden state and the learnable EOS token feature
         last_hidden = output.hidden_states[-1]
+        attention_mask = output["oe_attention_mask"]
 
         # extract the visual token number
         if self.vlm.vision_backbone.featurizer is not None:
@@ -140,7 +143,7 @@ class CogACT(nn.Module):
             raise ValueError("No vision backbone found")
         
         # since using three input images, the num_patch should be 3 times the original 
-        last_hidden = last_hidden[:, num_patch :]
+        last_hidden = last_hidden[:, num_patch * 2 :]
 
         # extract the cognition feature
         cumulative_sum = attention_mask.cumsum(dim=1)

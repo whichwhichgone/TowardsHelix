@@ -1,0 +1,38 @@
+# 红色方块-无环境纹理
+"red block": "red_block.png"
+# 蓝色方块-无环境纹理
+"blue block": "blue_block.png"
+# 粉色方块-无环境纹理
+"pink block": "pink_block.png"
+# 柜子把手-近似无环境纹理
+"door handle": "sliding_door_handle.png"
+# 柜子门-有环境纹理
+"door": "sliding_door.png" # 指的就是sliding door
+"sliding door": "sliding_door.png"
+# 抽屉把手-近似无环境纹理
+"drawer handle": "handle.png"
+"handle of the drawer": "handle.png" # 到底是用handle指代那个抽屉handle还是还是完整的the handle of the drawer?后者
+# "handle": "handle.png" # 这个感觉歧义比较严重,或者不训练了也可以
+# 抽屉-有环境纹理
+"drawer": "drawer.png"
+"cabinet drawer": "drawer.png"
+# 柜子-有环境纹理
+"shelf": "sliding_cabinet.png"
+"sliding cabinet": "sliding_cabinet.png"
+"cabinet": "sliding_cabinet.png"
+"slider": "sliding_cabinet.png"
+# 灯泡-无环境纹理
+"light bulb": "light_bulb.png"
+"yellow light": "light_bulb.png"
+"yellow lamp": "light_bulb.png"
+# 灯泡开关-近似无环境纹理
+"switch": "switch.png"
+"light switch": "switch.png"
+# LED灯-无环境纹理
+"led light": "led_light.png"
+"led": "led_light.png"
+"led lamp": "led_light.png"
+"green light": "led_light.png"
+"green lamp": "led_light.png"
+# 按钮-无环境纹理
+"button": "button.png"

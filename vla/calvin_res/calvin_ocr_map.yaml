@@ -1,0 +1,389 @@
+close the cabinet drawer: close_drawer_ins8
+close the drawer: close_drawer_ins4
+collapse the stacked blocks: unstack_block_ins0
+go close the drawer: close_drawer_ins5
+go open the drawer: open_drawer_ins5
+go push the blue block to the left: push_blue_block_left_ins3
+go push the blue block to the right: push_blue_block_right_ins3
+go push the pink block to the left: push_pink_block_left_ins3
+go push the pink block to the right: push_pink_block_right_ins3
+go push the red block to the left: push_red_block_left_ins3
+go push the red block to the right: push_red_block_right_ins3
+go slide the blue block to the left: push_blue_block_left_ins8
+go slide the blue block to the right: push_blue_block_right_ins8
+go slide the pink block to the left: push_pink_block_left_ins8
+go slide the pink block to the right: push_pink_block_right_ins8
+go slide the red block to the left: push_red_block_left_ins8
+go slide the red block to the right: push_red_block_right_ins8
+go to the tower of blocks and take off the top one: unstack_block_ins3
+go towards the blue block in the drawer and grasp it: lift_blue_block_drawer_ins7
+go towards the blue block in the drawer and lift it: lift_blue_block_drawer_ins8
+go towards the blue block in the drawer and pick it up: lift_blue_block_drawer_ins6
+go towards the drawer and place the object: place_in_drawer_ins10
+go towards the drawer and store the object: place_in_drawer_ins13
+go towards the pink block in the drawer and grasp it: lift_pink_block_drawer_ins7
+go towards the pink block in the drawer and lift it: lift_pink_block_drawer_ins8
+go towards the pink block in the drawer and pick it up: lift_pink_block_drawer_ins6
+go towards the red block in the drawer and grasp it: lift_red_block_drawer_ins7
+go towards the red block in the drawer and lift it: lift_red_block_drawer_ins8
+go towards the red block in the drawer and pick it up: lift_red_block_drawer_ins6
+grasp the blue block and lift it up: lift_blue_block_table_ins7
+grasp the blue block and rotate it left: rotate_blue_block_left_ins2
+grasp the blue block and rotate it right: rotate_blue_block_right_ins2
+grasp the blue block and turn it left: rotate_blue_block_left_ins3
+grasp the blue block and turn it right: rotate_blue_block_right_ins3
+grasp the blue block from the drawer: lift_blue_block_drawer_ins0
+grasp the blue block in the drawer: lift_blue_block_drawer_ins2
+grasp the blue block lying in the cabinet: lift_blue_block_slider_ins4
+grasp the blue block lying in the drawer: lift_blue_block_drawer_ins1
+grasp the blue block lying in the slider: lift_blue_block_slider_ins6
+grasp the blue block lying in the sliding cabinet: lift_blue_block_slider_ins5
+grasp the blue block lying on the shelf: lift_blue_block_slider_ins3
+grasp the blue block on the table and lift it up: lift_blue_block_table_ins6
+grasp the blue block on the table, then lift it up: lift_blue_block_table_ins8
+grasp the blue block, then lift it up: lift_blue_block_table_ins9
+grasp the blue block, then rotate it left: rotate_blue_block_left_ins0
+grasp the blue block, then rotate it right: rotate_blue_block_right_ins0
+grasp the blue block, then turn it left: rotate_blue_block_left_ins1
+grasp the blue block, then turn it right: rotate_blue_block_right_ins1
+grasp the door handle and move the door to the left: move_slider_left_ins3
+grasp the door handle and move the door to the right: move_slider_right_ins3
+grasp the door handle and slide the door to the left: move_slider_left_ins2
+grasp the door handle and slide the door to the right: move_slider_right_ins2
+grasp the door handle, then move the door to the left: move_slider_left_ins1
+grasp the door handle, then move the door to the right: move_slider_right_ins1
+grasp the door handle, then slide the door to the left: move_slider_left_ins0
+grasp the door handle, then slide the door to the right: move_slider_right_ins0
+grasp the drawer handle and close it: close_drawer_ins1
+grasp the drawer handle and open it: open_drawer_ins1
+grasp the drawer handle, then close it: close_drawer_ins0
+grasp the drawer handle, then open it: open_drawer_ins0
+grasp the handle of the drawer and close it: close_drawer_ins3
+grasp the handle of the drawer and open it: open_drawer_ins3
+grasp the handle of the drawer, then close it: close_drawer_ins2
+grasp the handle of the drawer, then open it: open_drawer_ins2
+grasp the pink block and lift it up: lift_pink_block_table_ins7
+grasp the pink block and rotate it left: rotate_pink_block_left_ins2
+grasp the pink block and rotate it right: rotate_pink_block_right_ins2
+grasp the pink block and turn it left: rotate_pink_block_left_ins3
+grasp the pink block and turn it right: rotate_pink_block_right_ins3
+grasp the pink block from the drawer: lift_pink_block_drawer_ins0
+grasp the pink block in the drawer: lift_pink_block_drawer_ins2
+grasp the pink block lying in the cabinet: lift_pink_block_slider_ins4
+grasp the pink block lying in the drawer: lift_pink_block_drawer_ins1
+grasp the pink block lying in the slider: lift_pink_block_slider_ins6
+grasp the pink block lying in the sliding cabinet: lift_pink_block_slider_ins5
+grasp the pink block lying on the shelf: lift_pink_block_slider_ins3
+grasp the pink block on the table and lift it up: lift_pink_block_table_ins6
+grasp the pink block on the table, then lift it up: lift_pink_block_table_ins8
+grasp the pink block, then lift it up: lift_pink_block_table_ins9
+grasp the pink block, then rotate it left: rotate_pink_block_left_ins0
+grasp the pink block, then rotate it right: rotate_pink_block_right_ins0
+grasp the pink block, then turn it left: rotate_pink_block_left_ins1
+grasp the pink block, then turn it right: rotate_pink_block_right_ins1
+grasp the red block and lift it up: lift_red_block_table_ins7
+grasp the red block and rotate it left: rotate_red_block_left_ins2
+grasp the red block and rotate it right: rotate_red_block_right_ins2
+grasp the red block and turn it left: rotate_red_block_left_ins3
+grasp the red block and turn it right: rotate_red_block_right_ins3
+grasp the red block from the drawer: lift_red_block_drawer_ins0
+grasp the red block in the drawer: lift_red_block_drawer_ins2
+grasp the red block lying in the cabinet: lift_red_block_slider_ins4
+grasp the red block lying in the drawer: lift_red_block_drawer_ins1
+grasp the red block lying in the slider: lift_red_block_slider_ins6
+grasp the red block lying in the sliding cabinet: lift_red_block_slider_ins5
+grasp the red block lying on the shelf: lift_red_block_slider_ins3
+grasp the red block on the table and lift it up: lift_red_block_table_ins6
+grasp the red block on the table, then lift it up: lift_red_block_table_ins8
+grasp the red block, then lift it up: lift_red_block_table_ins9
+grasp the red block, then rotate it left: rotate_red_block_left_ins0
+grasp the red block, then rotate it right: rotate_red_block_right_ins0
+grasp the red block, then turn it left: rotate_red_block_left_ins1
+grasp the red block, then turn it right: rotate_red_block_right_ins1
+in the cabinet grasp the blue block: lift_blue_block_slider_ins14
+in the cabinet grasp the pink block: lift_pink_block_slider_ins14
+in the cabinet grasp the red block: lift_red_block_slider_ins14
+in the cabinet pick up the blue block: lift_blue_block_slider_ins12
+in the cabinet pick up the pink block: lift_pink_block_slider_ins12
+in the cabinet pick up the red block: lift_red_block_slider_ins12
+in the slider grasp the blue block: lift_blue_block_slider_ins13
+in the slider grasp the pink block: lift_pink_block_slider_ins13
+in the slider grasp the red block: lift_red_block_slider_ins13
+in the slider pick up the blue block: lift_blue_block_slider_ins11
+in the slider pick up the pink block: lift_pink_block_slider_ins11
+in the slider pick up the red block: lift_red_block_slider_ins11
+in the sliding cabinet grasp the blue block: lift_blue_block_slider_ins15
+in the sliding cabinet grasp the pink block: lift_pink_block_slider_ins15
+in the sliding cabinet grasp the red block: lift_red_block_slider_ins15
+lift the blue block: lift_blue_block_table_ins3
+lift the blue block from the table: lift_blue_block_table_ins0
+lift the blue block in the drawer: lift_blue_block_drawer_ins9
+lift the blue block lying in the cabinet: lift_blue_block_slider_ins8
+lift the blue block lying in the drawer: lift_blue_block_drawer_ins10
+lift the blue block lying in the slider: lift_blue_block_slider_ins10
+lift the blue block lying in the sliding cabinet: lift_blue_block_slider_ins9
+lift the blue block lying on the shelf: lift_blue_block_slider_ins7
+lift the blue block on the shelf: lift_blue_block_slider_ins16
+lift the blue block up: lift_blue_block_table_ins5
+lift the pink block: lift_pink_block_table_ins3
+lift the pink block from the table: lift_pink_block_table_ins0
+lift the pink block in the drawer: lift_pink_block_drawer_ins9
+lift the pink block lying in the cabinet: lift_pink_block_slider_ins8
+lift the pink block lying in the drawer: lift_pink_block_drawer_ins10
+lift the pink block lying in the slider: lift_pink_block_slider_ins10
+lift the pink block lying in the sliding cabinet: lift_pink_block_slider_ins9
+lift the pink block lying on the shelf: lift_pink_block_slider_ins7
+lift the pink block on the shelf: lift_pink_block_slider_ins16
+lift the pink block up: lift_pink_block_table_ins5
+lift the red block: lift_red_block_table_ins3
+lift the red block from the table: lift_red_block_table_ins0
+lift the red block in the drawer: lift_red_block_drawer_ins9
+lift the red block lying in the cabinet: lift_red_block_slider_ins8
+lift the red block lying in the drawer: lift_red_block_drawer_ins10
+lift the red block lying in the slider: lift_red_block_slider_ins10
+lift the red block lying in the sliding cabinet: lift_red_block_slider_ins9
+lift the red block lying on the shelf: lift_red_block_slider_ins7
+lift the red block on the shelf: lift_red_block_slider_ins16
+lift the red block up: lift_red_block_table_ins5
+move down the switch: turn_off_lightbulb_ins3
+move the door all the way to the left: move_slider_left_ins4
+move the door all the way to the left and let go: move_slider_left_ins13
+move the door all the way to the right: move_slider_right_ins4
+move the door all the way to the right and let go: move_slider_right_ins13
+move the door to the left: move_slider_left_ins6
+move the door to the left side: move_slider_left_ins9
+move the door to the right: move_slider_right_ins6
+move the door to the right side: move_slider_right_ins9
+move the light switch to turn off the light bulb: turn_off_lightbulb_ins6
+move the light switch to turn off the yellow light: turn_off_lightbulb_ins8
+move the light switch to turn on the light bulb: turn_on_lightbulb_ins6
+move the light switch to turn on the yellow light: turn_on_lightbulb_ins8
+move the sliding door to the left: move_slider_left_ins14
+move the sliding door to the right: move_slider_right_ins14
+move to the drawer and place the object: place_in_drawer_ins9
+move to the drawer and store the object: place_in_drawer_ins12
+move to the drawer, then place the object: place_in_drawer_ins11
+move to the drawer, then store the object: place_in_drawer_ins14
+move up the switch: turn_on_lightbulb_ins3
+open the cabinet drawer: open_drawer_ins8
+open the drawer: open_drawer_ins4
+pick up the blue block: lift_blue_block_table_ins4
+pick up the blue block from the drawer: lift_blue_block_drawer_ins4
+pick up the blue block from the shelf: lift_blue_block_slider_ins0
+pick up the blue block from the sliding cabinet: lift_blue_block_slider_ins1
+pick up the blue block from the table: lift_blue_block_table_ins2
+pick up the blue block in the drawer: lift_blue_block_drawer_ins5
+pick up the blue block in the sliding cabinet: lift_blue_block_slider_ins2
+pick up the blue block lying in the drawer: lift_blue_block_drawer_ins3
+pick up the blue block on the table: lift_blue_block_table_ins1
+pick up the pink block: lift_pink_block_table_ins4
+pick up the pink block from the drawer: lift_pink_block_drawer_ins4
+pick up the pink block from the shelf: lift_pink_block_slider_ins0
+pick up the pink block from the sliding cabinet: lift_pink_block_slider_ins1
+pick up the pink block from the table: lift_pink_block_table_ins2
+pick up the pink block in the drawer: lift_pink_block_drawer_ins5
+pick up the pink block in the sliding cabinet: lift_pink_block_slider_ins2
+pick up the pink block lying in the drawer: lift_pink_block_drawer_ins3
+pick up the pink block on the table: lift_pink_block_table_ins1
+pick up the red block: lift_red_block_table_ins4
+pick up the red block from the drawer: lift_red_block_drawer_ins4
+pick up the red block from the shelf: lift_red_block_slider_ins0
+pick up the red block from the sliding cabinet: lift_red_block_slider_ins1
+pick up the red block from the table: lift_red_block_table_ins2
+pick up the red block in the drawer: lift_red_block_drawer_ins5
+pick up the red block in the sliding cabinet: lift_red_block_slider_ins2
+pick up the red block lying in the drawer: lift_red_block_drawer_ins3
+pick up the red block on the table: lift_red_block_table_ins1
+place in slider: place_in_slider_ins0
+place the block in the cabinet: place_in_slider_ins8
+place the block in the drawer: place_in_drawer_ins0
+place the block in the slider: place_in_slider_ins14
+place the block in the sliding cabinet: place_in_slider_ins2
+place the block on top of another block: stack_block_ins3
+place the grasped block on top of another block: stack_block_ins4
+place the grasped object in the cabinet: place_in_slider_ins10
+place the grasped object in the drawer: place_in_drawer_ins2
+place the grasped object in the slider: place_in_slider_ins16
+place the grasped object in the sliding cabinet: place_in_slider_ins4
+place the object in the cabinet: place_in_slider_ins9
+place the object in the drawer: place_in_drawer_ins1
+place the object in the slider: place_in_slider_ins15
+place the object in the sliding cabinet: place_in_slider_ins3
+pull the drawer: open_drawer_ins7
+pull the handle of the drawer: open_drawer_ins6
+push down the button to turn off the green light: turn_off_led_ins7
+push down the button to turn off the led: turn_off_led_ins6
+push down the button to turn off the led light: turn_off_led_ins5
+push down the button to turn on the green light: turn_on_led_ins7
+push down the button to turn on the led: turn_on_led_ins6
+push down the button to turn on the led light: turn_on_led_ins5
+push left the blue block: push_blue_block_left_ins1
+push left the pink block: push_pink_block_left_ins1
+push left the red block: push_red_block_left_ins1
+push right the blue block: push_blue_block_right_ins1
+push right the pink block: push_pink_block_right_ins1
+push right the red block: push_red_block_right_ins1
+push the block into the drawer: push_into_drawer_ins1
+push the blue block to the left: push_blue_block_left_ins2
+push the blue block to the right: push_blue_block_right_ins2
+push the blue block towards the left: push_blue_block_left_ins0
+push the blue block towards the right: push_blue_block_right_ins0
+push the button to turn off the green light: turn_off_led_ins10
+push the button to turn off the led: turn_off_led_ins9
+push the button to turn off the led light: turn_off_led_ins8
+push the button to turn on the green light: turn_on_led_ins10
+push the button to turn on the led: turn_on_led_ins9
+push the button to turn on the led light: turn_on_led_ins8
+push the door to the left: move_slider_left_ins8
+push the door to the left side: move_slider_left_ins11
+push the door to the right: move_slider_right_ins8
+push the door to the right side: move_slider_right_ins11
+push the drawer: close_drawer_ins7
+push the handle of the drawer: close_drawer_ins6
+push the object into the drawer: push_into_drawer_ins0
+push the object that it falls into the drawer: push_into_drawer_ins6
+push the pink block to the left: push_pink_block_left_ins2
+push the pink block to the right: push_pink_block_right_ins2
+push the pink block towards the left: push_pink_block_left_ins0
+push the pink block towards the right: push_pink_block_right_ins0
+push the red block to the left: push_red_block_left_ins2
+push the red block to the right: push_red_block_right_ins2
+push the red block towards the left: push_red_block_left_ins0
+push the red block towards the right: push_red_block_right_ins0
+push the sliding door to the left: move_slider_left_ins15
+push the sliding door to the right: move_slider_right_ins15
+push the switch downwards: turn_off_lightbulb_ins4
+push the switch upwards: turn_on_lightbulb_ins4
+put it in the slider: place_in_slider_ins1
+put the block in the cabinet: place_in_slider_ins11
+put the block in the drawer: place_in_drawer_ins3
+put the block in the slider: place_in_slider_ins17
+put the block in the sliding cabinet: place_in_slider_ins5
+put the block on top of another block: stack_block_ins6
+put the grasped block on top of a block: stack_block_ins5
+put the grasped object in the cabinet: place_in_slider_ins13
+put the grasped object in the drawer: place_in_drawer_ins5
+put the grasped object in the slider: place_in_slider_ins19
+put the grasped object in the sliding cabinet: place_in_slider_ins7
+put the object in the cabinet: place_in_slider_ins12
+put the object in the drawer: place_in_drawer_ins4
+put the object in the slider: place_in_slider_ins18
+put the object in the sliding cabinet: place_in_slider_ins6
+remove a block from the stack: unstack_block_ins4
+remove the top block: unstack_block_ins6
+rotate left the blue block: rotate_blue_block_left_ins7
+rotate left the pink block: rotate_pink_block_left_ins7
+rotate left the red block: rotate_red_block_left_ins7
+rotate right the blue block: rotate_blue_block_right_ins7
+rotate right the pink block: rotate_pink_block_right_ins7
+rotate right the red block: rotate_red_block_right_ins6
+rotate the blue block 90 degrees to the left: rotate_blue_block_left_ins6
+rotate the blue block 90 degrees to the right: rotate_blue_block_right_ins6
+rotate the blue block to the left: rotate_blue_block_left_ins8
+rotate the blue block to the right: rotate_blue_block_right_ins8
+rotate the blue block towards the left: rotate_blue_block_left_ins9
+rotate the blue block towards the right: rotate_blue_block_right_ins9
+rotate the pink block 90 degrees to the left: rotate_pink_block_left_ins6
+rotate the pink block 90 degrees to the right: rotate_pink_block_right_ins6
+rotate the pink block to the left: rotate_pink_block_left_ins8
+rotate the pink block to the right: rotate_pink_block_right_ins8
+rotate the pink block towards the left: rotate_pink_block_left_ins9
+rotate the pink block towards the right: rotate_pink_block_right_ins9
+rotate the red block 90 degrees to the left: rotate_red_block_left_ins6
+rotate the red block 90 degrees to the right: rotate_red_block_right_ins7
+rotate the red block to the left: rotate_red_block_left_ins8
+rotate the red block to the right: rotate_red_block_right_ins8
+rotate the red block towards the left: rotate_red_block_left_ins9
+rotate the red block towards the right: rotate_red_block_right_ins9
+slide down the switch: turn_off_lightbulb_ins5
+slide left the blue block: push_blue_block_left_ins5
+slide left the pink block: push_pink_block_left_ins5
+slide left the red block: push_red_block_left_ins5
+slide right the blue block: push_blue_block_right_ins5
+slide right the pink block: push_pink_block_right_ins5
+slide right the red block: push_red_block_right_ins5
+slide the block into the drawer: push_into_drawer_ins3
+slide the blue block to the left: push_blue_block_left_ins6
+slide the blue block to the right: push_blue_block_right_ins6
+slide the blue block towards the left: push_blue_block_left_ins4
+slide the blue block towards the right: push_blue_block_right_ins4
+slide the door all the way to the left: move_slider_left_ins5
+slide the door all the way to the right: move_slider_right_ins5
+slide the door to the left: move_slider_left_ins7
+slide the door to the left side: move_slider_left_ins10
+slide the door to the left, then let it go: move_slider_left_ins12
+slide the door to the right: move_slider_right_ins7
+slide the door to the right side: move_slider_right_ins10
+slide the door to the right, then let it go: move_slider_right_ins12
+slide the object into the drawer: push_into_drawer_ins2
+slide the pink block to the left: push_pink_block_left_ins6
+slide the pink block to the right: push_pink_block_right_ins6
+slide the pink block towards the left: push_pink_block_left_ins4
+slide the pink block towards the right: push_pink_block_right_ins4
+slide the red block to the left: push_red_block_left_ins6
+slide the red block to the right: push_red_block_right_ins6
+slide the red block towards the left: push_red_block_left_ins4
+slide the red block towards the right: push_red_block_right_ins4
+slide up the switch: turn_on_lightbulb_ins5
+stack blocks on top of each other: stack_block_ins0
+stack the block on top of another block: stack_block_ins7
+stack the blocks: stack_block_ins1
+stack the object on top of another object: stack_block_ins2
+store the block in the drawer: place_in_drawer_ins6
+store the grasped object in the drawer: place_in_drawer_ins8
+store the object in the drawer: place_in_drawer_ins7
+sweep the block into the drawer: push_into_drawer_ins5
+sweep the blue block to the left: push_blue_block_left_ins7
+sweep the blue block to the right: push_blue_block_right_ins7
+sweep the object into the drawer: push_into_drawer_ins4
+sweep the pink block to the left: push_pink_block_left_ins7
+sweep the pink block to the right: push_pink_block_right_ins7
+sweep the red block to the left: push_red_block_left_ins7
+sweep the red block to the right: push_red_block_right_ins7
+take off the block that is on top of the other one: unstack_block_ins5
+take off the stacked block: unstack_block_ins1
+take the blue block and rotate it left: rotate_blue_block_left_ins4
+take the blue block and rotate it right: rotate_blue_block_right_ins4
+take the blue block and turn it left: rotate_blue_block_left_ins5
+take the blue block and turn it right: rotate_blue_block_right_ins5
+take the pink block and rotate it left: rotate_pink_block_left_ins4
+take the pink block and rotate it right: rotate_pink_block_right_ins4
+take the pink block and turn it left: rotate_pink_block_left_ins5
+take the pink block and turn it right: rotate_pink_block_right_ins5
+take the red block and rotate it left: rotate_red_block_left_ins4
+take the red block and rotate it right: rotate_red_block_right_ins4
+take the red block and turn it left: rotate_red_block_left_ins5
+take the red block and turn it right: rotate_red_block_right_ins5
+toggle the button to turn off the green light: turn_off_led_ins13
+toggle the button to turn off the led: turn_off_led_ins12
+toggle the button to turn off the led light: turn_off_led_ins11
+toggle the button to turn on the green light: turn_on_led_ins13
+toggle the button to turn on the led: turn_on_led_ins12
+toggle the button to turn on the led light: turn_on_led_ins11
+toggle the light switch to turn off the light bulb: turn_off_lightbulb_ins7
+toggle the light switch to turn off the yellow light: turn_off_lightbulb_ins9
+toggle the light switch to turn on the light bulb: turn_on_lightbulb_ins7
+toggle the light switch to turn on the yellow light: turn_on_lightbulb_ins9
+turn off the green lamp: turn_off_led_ins4
+turn off the green light: turn_off_led_ins3
+turn off the led: turn_off_led_ins1
+turn off the led lamp: turn_off_led_ins2
+turn off the led light: turn_off_led_ins0
+turn off the light bulb: turn_off_lightbulb_ins0
+turn off the yellow lamp: turn_off_lightbulb_ins2
+turn off the yellow light: turn_off_lightbulb_ins1
+turn on the green lamp: turn_on_led_ins4
+turn on the green light: turn_on_led_ins3
+turn on the led: turn_on_led_ins1
+turn on the led lamp: turn_on_led_ins2
+turn on the led light: turn_on_led_ins0
+turn on the light bulb: turn_on_lightbulb_ins0
+turn on the yellow lamp: turn_on_lightbulb_ins2
+turn on the yellow light: turn_on_lightbulb_ins1
+turn the blue block left: rotate_blue_block_left_ins10
+turn the blue block right: rotate_blue_block_right_ins10
+turn the pink block left: rotate_pink_block_left_ins10
+turn the pink block right: rotate_pink_block_right_ins10
+turn the red block left: rotate_red_block_left_ins10
+turn the red block right: rotate_red_block_right_ins10
+unstack the blocks: unstack_block_ins2

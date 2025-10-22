@@ -177,3 +177,98 @@ class PaddedCollatorForActionPrediction:
         if dataset_names is not None:
             output["dataset_names"] = dataset_names
         return output
+
+
+@dataclass
+class PaddedCollatorForActionPredictionOe(PaddedCollatorForActionPrediction):
+
+    def __call__(self, instances: Sequence[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
+        input_ids, labels = tuple([instance[key] for instance in instances] for key in ("input_ids", "labels"))
+        pixel_values_scene = [instance["pixel_values"]["scene"] for instance in instances]
+        pixel_values_left = [instance["pixel_values"]["left"] for instance in instances]
+        pixel_values_right = [instance["pixel_values"]["right"] for instance in instances]
+        pixel_utils = [instance["pixel_utils"] for instance in instances]
+
+        if "dataset_name" in instances[0]:
+            dataset_names = [instance["dataset_name"] for instance in instances]
+        else:
+            dataset_names = None
+
+        # For now, we only support Tokenizers with `padding_side = "right"` during training
+        #   => Handle padding via RNN Utils => `pad_sequence`
+        assert self.padding_side == "right", f"Invalid Tokenizer `{self.padding_side = }`"
+        input_ids = pad_sequence(input_ids, batch_first=True, padding_value=self.pad_token_id)
+        labels = pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX)
+
+        # Truncate (if necessary)
+        input_ids, labels = input_ids[:, : self.model_max_length], labels[:, : self.model_max_length]
+
+        # Get `attention_mask` by checking for `pad_token_id`
+        attention_mask = input_ids.ne(self.pad_token_id)
+
+        # [Contract] For VLA Training =>> No "Unimodal" Data!
+        assert all([pv is not None for pv in pixel_values_scene]), "Invalid VLA Example with `pixel_values = None`!"
+        assert all([pv is not None for pv in pixel_values_left]), "Invalid VLA Example with `pixel_values = None`!"
+        assert all([pv is not None for pv in pixel_values_right]), "Invalid VLA Example with `pixel_values = None`!"
+
+        # Stack all `pixel_values` --> depending on type is torch.Tensor or Dict[str, torch.Tensor]
+        ### 0. process for scene image
+        if isinstance(pixel_values_scene[0], torch.Tensor):
+            pixel_values_scene = torch.stack(pixel_values_scene)
+        elif isinstance(pixel_values_scene[0], dict):
+            pixel_values_scene = {
+                k: torch.stack([pixel_values_scene[idx][k] for idx in range(len(input_ids))]) for k in pixel_values_scene[0]
+            }
+        else:
+            raise ValueError(f"Unsupported `pixel_values_scene` type = {type(pixel_values_scene)}")
+        
+        ### 1. process for left image
+        if isinstance(pixel_values_left[0], torch.Tensor):
+            pixel_values_left = torch.stack(pixel_values_left)
+        elif isinstance(pixel_values_left[0], dict):
+            pixel_values_left = {
+                k: torch.stack([pixel_values_left[idx][k] for idx in range(len(input_ids))]) for k in pixel_values_left[0]
+            }
+        else:
+            raise ValueError(f"Unsupported `pixel_values_left` type = {type(pixel_values_left)}")
+        
+        ### 2. process for right image
+        if isinstance(pixel_values_right[0], torch.Tensor):
+            pixel_values_right = torch.stack(pixel_values_right)
+        elif isinstance(pixel_values_right[0], dict):
+            pixel_values_right = {
+                k: torch.stack([pixel_values_right[idx][k] for idx in range(len(input_ids))]) for k in pixel_values_right[0]
+            }
+        else:
+            raise ValueError(f"Unsupported `pixel_values_right` type = {type(pixel_values_right)}")  
+
+        ### 3. for total pixel values
+        pixel_values = dict(scene=pixel_values_scene, left=pixel_values_left)
+
+        ### 4. process for pixel utils
+        for idx, util_item in enumerate(pixel_utils):
+            util_item_new = {k: [] for k, v in util_item[0].items()}
+            for elem in util_item:
+                for k, v in elem.items():
+                    util_item_new[k].append(v)
+            util_item_new = {k: torch.stack(v) for k, v in util_item_new.items()}
+            pixel_utils[idx] = util_item_new
+
+        # Adding continuous actions and batch processing.
+        actions = [instance["actions"] for instance in instances]
+        actions = torch.stack(actions)
+        action_masks = [instance["action_masks"] for instance in instances]
+        action_masks = torch.stack(action_masks)
+
+        output = dict(
+            pixel_values=pixel_values,
+            pixel_utils=pixel_utils,
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=labels,
+            actions=actions,
+            action_masks=action_masks,
+        )
+        if dataset_names is not None:
+            output["dataset_names"] = dataset_names
+        return output

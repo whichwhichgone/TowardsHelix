@@ -47,6 +47,9 @@ def make_dataset_from_rlds(
     depth_obs_keys: Dict[str, Optional[str]] = {},
     state_obs_keys: List[Optional[str]] = (),
     language_key: Optional[str] = None,
+    mm_task_key: Optional[str] = None,
+    mm_prompt_key: Optional[str] = None,
+    mm_utils_key: Optional[str] = None,
     action_proprio_normalization_type: NormalizationType = NormalizationType.NORMAL,
     dataset_statistics: Optional[Union[dict, str]] = None,
     absolute_action_mask: Optional[List[bool]] = None,
@@ -179,10 +182,22 @@ def make_dataset_from_rlds(
                     f"Language key {language_key} has dtype {traj[language_key].dtype}, " "but it must be tf.string."
                 )
             task["language_instruction"] = traj.pop(language_key)
+        
+        # extracts `keys` for oe-vla
+        mm_task = {}
+        if mm_task_key is not None:
+            if traj[mm_task_key].dtype != tf.string:
+                raise ValueError(
+                    f"MM Task key {mm_task_key} has dtype {traj[mm_task_key].dtype}, " "but it must be tf.string."
+                )
+            mm_task["task_type"] = traj.pop(mm_task_key)
+            mm_task["mm_instruction"] = traj.pop(mm_prompt_key)
+            mm_task["mm_utils"] = traj.pop(mm_utils_key)
 
         traj = {
             "observation": new_obs,
             "task": task,
+            "mm_task": mm_task,
             "action": tf.cast(traj["action"], tf.float32),
             "dataset_name": tf.repeat(name, traj_len),
         }

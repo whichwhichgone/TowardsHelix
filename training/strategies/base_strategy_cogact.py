@@ -302,6 +302,7 @@ class TrainingStrategy(ABC):
                             attention_mask=batch["attention_mask"],
                             actions=batch["actions"],
                             pixel_values=batch["pixel_values"],
+                            pixel_utils=batch["pixel_utils"],
                             action_masks=batch["action_masks"],
                             labels=batch["labels"],
                             output_hidden_states = True,
