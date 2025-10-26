@@ -53,7 +53,7 @@ class VLAServer:
             actions, _ = self.vla.predict_action(
                 image_all,
                 instruction,
-                unnorm_key='ur5e_benchmark_v1',
+                unnorm_key='example_dataset',
                 cfg_scale=1.5,
                 use_ddim=True,
                 num_ddim_steps=10,
@@ -68,7 +68,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model-path",
         type=str,
-        default="/liujinxin/code/CogACT/logs/ur5e_benchmark_v1_0511_2133--image_aug/checkpoints/step-020000-epoch-22-loss=0.0224.pt",
+        default="/liujinxin/zhaowei/CogACT/logs/calvin_cogact/checkpoints/step-033600-epoch-01-loss=0.0411.pt",
     )
     parser.add_argument(
         "--load-for-training",
@@ -84,7 +84,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--future-action-window-size",
         type=int,
-        default=15,
+        default=9,
         help="Future action window size (default: 15)",
     )
     parser.add_argument("--port", type=int, default=9002, help="Port number for flask server")
@@ -99,21 +99,19 @@ if __name__ == "__main__":
     @flask_app.route("/predict", methods=["POST"])
     def predict():
         if request.method == "POST":
-            img_scene = np.frombuffer(request.files["img_scene"].read(), dtype=np.uint8)
-            img_scene = img_scene.reshape((VISION_IMAGE_SIZE, VISION_IMAGE_SIZE, 3))
-            img_hand_left = np.frombuffer(request.files["img_hand_left"].read(), dtype=np.uint8)
-            img_hand_left = img_hand_left.reshape((VISION_IMAGE_SIZE, VISION_IMAGE_SIZE, 3))
-            img_hand_right = np.frombuffer(request.files["img_hand_right"].read(), dtype=np.uint8)
-            img_hand_right = img_hand_right.reshape((VISION_IMAGE_SIZE, VISION_IMAGE_SIZE, 3))
+            img_static = np.frombuffer(request.files["img_static"].read(), dtype=np.uint8)
+            img_static = img_static.reshape((200, 200, 3))
+            img_gripper = np.frombuffer(request.files["img_gripper"].read(), dtype=np.uint8)
+            img_gripper = img_gripper.reshape((84, 84, 3))
 
             # instructions and robot_obs for final input
             content = request.files["json"].read()
             content = json.loads(content)
             instruction = content["instruction"]
 
-            # compose the input
-            image_all = vla_robot.compose_input(img_scene, img_hand_left, img_hand_right, instruction)
-            action = vla_robot.generate_action(instruction, image_all)
+            # compose the input, use only a single view for calvin
+            image_all = vla_robot.compose_input(img_static, img_static, img_static, instruction)
+            action = vla_robot.generate_action(instruction, image_all).reshape(-1)
             return jsonify(action.tolist())
 
     # Run the server
