@@ -27,6 +27,16 @@ from prismatic.vla.datasets.rlds.utils.data_utils import NormalizationType
 IGNORE_INDEX = -100
 
 
+def remove_brackets_and_numbers(text: str) -> str:
+    """
+    "pick up [corn2] and put it in the bowl" -> "pick up corn and put it in the bowl"
+    """
+    import re
+    pattern = r'\[([a-zA-Z_]+)\d*\]'
+    result = re.sub(pattern, r'\1', text)
+    return result
+
+
 @dataclass
 class RLDSBatchTransform:
     action_tokenizer: ActionTokenizer
@@ -55,6 +65,7 @@ class RLDSBatchTransform:
             img_right.save(img_debug_path / "train_img_right.png")
 
         lang = rlds_batch["task"]["language_instruction"].decode().lower()
+        lang = remove_brackets_and_numbers(lang)
 
         # Construct Chat-based Prompt
         prompt_builder = self.prompt_builder_fn("openvla")
