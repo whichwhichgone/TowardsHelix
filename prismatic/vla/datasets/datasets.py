@@ -241,7 +241,9 @@ class RLDSBatchTransformOe(RLDSBatchTransform):
         if not self.predict_stop_token:
             labels[-1] = IGNORE_INDEX
 
-        return dict(pixel_values=pixel_values, pixel_utils=pixel_utils, input_ids=input_ids, labels=labels, dataset_name=dataset_name, actions=action, action_masks=action_mask)
+        state = rlds_batch["observation"]["proprio"]
+        state = torch.tensor(state, dtype=torch.float32)
+        return dict(pixel_values=pixel_values, pixel_utils=pixel_utils, input_ids=input_ids, labels=labels, dataset_name=dataset_name, actions=action, action_masks=action_mask, state=state)
 
 
 class RLDSDataset(IterableDataset):

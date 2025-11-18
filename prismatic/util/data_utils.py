@@ -259,6 +259,8 @@ class PaddedCollatorForActionPredictionOe(PaddedCollatorForActionPrediction):
         actions = torch.stack(actions)
         action_masks = [instance["action_masks"] for instance in instances]
         action_masks = torch.stack(action_masks)
+        state = [instance["state"] for instance in instances]
+        state = torch.stack(state)
 
         output = dict(
             pixel_values=pixel_values,
@@ -268,6 +270,7 @@ class PaddedCollatorForActionPredictionOe(PaddedCollatorForActionPrediction):
             labels=labels,
             actions=actions,
             action_masks=action_masks,
+            state=state,
         )
         if dataset_names is not None:
             output["dataset_names"] = dataset_names

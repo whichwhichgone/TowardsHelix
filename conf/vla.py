@@ -96,14 +96,12 @@ class Exp_SigLIP_224px_Bridge(VLAConfig):
 @dataclass
 class Exp_CogACT_OXE_Magic_Soup_Plus_Minus(Exp_SigLIP_224px_Bridge):
     vla_id: str = "prism-dinosiglip-224px+oxe+diffusion"
-    base_vlm: Union[str, Path] = "prism-dinosiglip-224px+7b"
+    base_vlm: Union[str, Path] = "/zhaowei/models/prismatic-vlms/prism-dinosiglip-224px+7b"
 
     # data_mix: str = "oxe_magic_soup_plus"
     data_mix: str = "oxe_magic_soup_plus_minus"
     shuffle_buffer_size: int = 1_000
     freeze_vision_backbone: bool = True
-    freeze_llm_backbone: bool = True
-    unfreeze_last_llm_layer: bool = True
     expected_world_size: int = 16
     global_batch_size: int = 256
     per_device_batch_size: int = 16

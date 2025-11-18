@@ -194,7 +194,7 @@ class DiT(nn.Module):
         # Learnable positional embeddings
         # +2, one for the conditional token, and one for the current action prediction
         self.positional_embedding = nn.Parameter(
-                scale * torch.randn(future_action_window_size + past_action_window_size + 2, hidden_size))
+                scale * torch.randn(future_action_window_size + past_action_window_size + 3, hidden_size))
 
         self.blocks = nn.ModuleList([
             DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
@@ -248,7 +248,7 @@ class DiT(nn.Module):
         for block in self.blocks:
             x = block(x)                                    # (N, T+1, D)
         x = self.final_layer(x)                             # (N, T+1, out_channels)
-        return x[:, 1:, :]     # (N, T, C)
+        return x[:, 2:, :]     # (N, T, C)
 
     def forward_with_cfg(self, x, t, z, cfg_scale):
         """

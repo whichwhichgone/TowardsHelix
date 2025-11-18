@@ -78,7 +78,7 @@ class VLAServer:
                 img_all,
                 img_utils,
                 oe_lang,
-                unnorm_key='calvin_abc2d_oe',
+                unnorm_key='piper_oe_nolang',
                 cfg_scale=1.5,
                 use_ddim=True,
                 num_ddim_steps=10,
@@ -94,7 +94,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model-path",
         type=str,
-        default="/zhaowei/workspace/CogACT/logs/cogact_calvin_oe_abc2d_resample_state_lr1.5_noresample/checkpoints/step-033491-epoch-01-loss=0.0651.pt",
+        default="/zhaowei/workspace/CogACT/logs/piper_oe_state_lr1.5_large_nolang/checkpoints/step-008328-epoch-02-loss=0.0116.pt",
     )
     parser.add_argument(
         "--load-for-training",
@@ -110,7 +110,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--future-action-window-size",
         type=int,
-        default=9,
+        default=15,
         help="Future action window size (default: 15)",
     )
     parser.add_argument("--port", type=int, default=9002, help="Port number for flask server")
@@ -131,16 +131,16 @@ if __name__ == "__main__":
     def predict():
         if request.method == "POST":
             img_static = np.frombuffer(request.files["img_static"].read(), dtype=np.uint8)
-            img_static = img_static.reshape((200, 200, 3))
+            img_static = img_static.reshape((224, 224, 3))
             img_static = Image.fromarray(img_static)
             img_gripper = np.frombuffer(request.files["img_gripper"].read(), dtype=np.uint8)
-            img_gripper = img_gripper.reshape((84, 84, 3))
+            img_gripper = img_gripper.reshape((224, 224, 3))
             img_gripper = Image.fromarray(img_gripper)
 
             # instructions and robot_obs for final input
             content = json.loads(request.files["json"].read())
             instruction = content["instruction"]
-            robot_obs = content["robot_obs"]
+            robot_obs = content["state"][-7:]
 
             subtask_instruction_type = json.loads(request.files["subtask_instruction_type"].read())
             instruction_type = subtask_instruction_type["instruction_type"]
@@ -170,8 +170,8 @@ if __name__ == "__main__":
                 elif len(object_goal_list) == 0:
                     print("No object images provided for mmins instruction.")     
             elif vla_robot.instruction_type == "goal_image":
-                goal_img_static = np.frombuffer(request.files["goal_img_static"].read(), dtype=np.uint8)
-                goal_img_static = goal_img_static.reshape((200, 200, 3))
+                goal_img_static = np.frombuffer(request.files["goal_image_static"].read(), dtype=np.uint8)
+                goal_img_static = goal_img_static.reshape((224, 224, 3))
                 goal_img_static = Image.fromarray(goal_img_static)
                 if args.debug:
                     goal_img_static.save("imgs_debug/debug_goal_img_static.png", "PNG")
@@ -179,9 +179,9 @@ if __name__ == "__main__":
             elif vla_robot.instruction_type == "imitation_video":
                 video_static = np.frombuffer(
                     request.files["imitation_video_static"].read(), dtype=np.uint8
-                    ).reshape((-1, 200, 200, 3))
+                    ).reshape((-1, 224, 224, 3))
                 video_static_list = [
-                    Image.fromarray(video_static[i].reshape((200, 200, 3)))
+                    Image.fromarray(video_static[i].reshape((224, 224, 3)))
                     for i in range(video_static.shape[0])
                 ]
                 if args.debug:
@@ -206,8 +206,8 @@ if __name__ == "__main__":
             robot_obs_norm = os.path.dirname(os.path.dirname(args.model_path)) + "/dataset_statistics.json"
             with open(robot_obs_norm, 'r') as f:
                 norm_stats = json.load(f)
-            robot_obs_low = np.array(norm_stats["calvin_abc2d_oe"]["proprio"]["q01"])
-            robot_obs_high = np.array(norm_stats["calvin_abc2d_oe"]["proprio"]["q99"])
+            robot_obs_low = np.array(norm_stats["piper_oe_nolang"]["proprio"]["q01"])
+            robot_obs_high = np.array(norm_stats["piper_oe_nolang"]["proprio"]["q99"])
             robot_obs = np.array(robot_obs)
             robot_obs = np.clip(2 * (robot_obs - robot_obs_low) / (robot_obs_high - robot_obs_low + 1e-8) - 1, -1, 1)
             action = vla_robot.generate_action(img_all, img_utils, oe_lang, robot_obs).reshape(-1)

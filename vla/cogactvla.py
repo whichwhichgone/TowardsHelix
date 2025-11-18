@@ -61,6 +61,7 @@ class CogACT(nn.Module):
                                             in_channels = action_dim, 
                                             future_action_window_size = future_action_window_size, 
                                             past_action_window_size = past_action_window_size)
+        self.state_proj = nn.Linear(7, token_size, bias=False)
         self.vlm = vlm
         self.future_action_window_size = future_action_window_size
         self.past_action_window_size = past_action_window_size
@@ -68,14 +69,14 @@ class CogACT(nn.Module):
         if self.use_ema:
             self.ema_diffusion = deepcopy(self.action_model)
             self.ema_diffusion.requires_grad_(False)
-            self.all_module_keys = ['action_model', 'ema_diffusion']
+            self.all_module_keys = ['action_model', 'ema_diffusion', 'state_proj']
         else:
-            self.all_module_keys = ['action_model']
+            self.all_module_keys = ['action_model', 'state_proj']
         for module_keys in self.vlm.all_module_keys:
             self.all_module_keys.append("vlm." + module_keys)
 
         # Diffusion head is always trainable
-        self._trainable_module_keys = ['action_model']
+        self._trainable_module_keys = ['action_model', 'state_proj']
         self.norm_stats = norm_stats
 
     @property
@@ -113,6 +114,7 @@ class CogACT(nn.Module):
         return_dict: Optional[bool] = None,
         repeated_diffusion_steps: int = 4,
         action_masks = None,
+        state = None,
     ) -> Tuple:
         """Run a forward pass through the VLM, returning a CausalLMOutputWithPast instance (contains loss)."""
         
@@ -149,7 +151,9 @@ class CogACT(nn.Module):
         cumulative_sum = attention_mask.cumsum(dim=1)
         last_true_indices = (cumulative_sum == cumulative_sum.max(dim=1, keepdim=True)[0]).float().argmax(dim=1)  
         expanded_indices = last_true_indices.unsqueeze(-1).expand(-1, last_hidden.size(-1))  
-        cognition_features = last_hidden.gather(1, expanded_indices.unsqueeze(1))  # [B, 1, D]
+        cognition_features = last_hidden.gather(1, expanded_indices.unsqueeze(1))   # [B, 1, D]
+        state_features = self.state_proj(state)                                     # [B, 1, D]
+        cognition_features = torch.cat([cognition_features, state_features], dim=1) # [B, 2, D]
 
         actions_history = actions[:,0:self.past_action_window_size,:]
         actions_future = actions[:, -(self.future_action_window_size+1):, :]
@@ -247,6 +251,13 @@ class CogACT(nn.Module):
                         use_ema = use_ema,
                         norm_stats = norm_stats,
                         )
+        # Load State projector from Checkpoint
+        if "state_proj" in model_state_dict:
+            try:
+                cogact.state_proj.load_state_dict(model_state_dict["state_proj"])
+                overwatch.info("Successfully loaded state_proj weights from the pretrained checkpoint.")
+            except Exception as e:
+                overwatch.warning(f"Failed to load state_proj weights: {e}. Initializing with random weights.")
 
         # Load ActionModel from Checkpoint
         if "action_model" in model_state_dict:
@@ -266,12 +277,14 @@ class CogACT(nn.Module):
 
     @torch.inference_mode()
     def predict_action(
-        self, image: Image, 
+        self, image: Image,
+        utils: Image,
         instruction: str, 
         unnorm_key: Optional[str] = None, 
         cfg_scale: float = 1.5, 
         use_ddim: bool = False,
         num_ddim_steps: int = 5,
+        robot_obs = None,
         **kwargs: str
     ) -> np.ndarray:
         """
@@ -288,6 +301,7 @@ class CogACT(nn.Module):
         @return Unnormalized (continuous) action vector --> end-effector deltas.
         """
         image_transform, tokenizer = self.vlm.vision_backbone.image_transform, self.vlm.llm_backbone.tokenizer
+        tokenizer.add_special_tokens({'additional_special_tokens': ['<oe>']})
 
         # Build VLA Prompt
         prompt_builder = self.vlm.get_prompt_builder()
@@ -306,7 +320,7 @@ class CogACT(nn.Module):
             raise ValueError(f"Unsupported `tokenizer` type = {type(tokenizer)}")
 
         # Preprocess Image
-        image_scene, image_hand_left, image_hand_right = image["scene"], image["left"], image["right"]
+        image_scene, image_hand_left = image["scene"], image["left"]
         pixel_values_scene = image_transform(image_scene)
         if isinstance(pixel_values_scene, torch.Tensor):
             pixel_values_scene = pixel_values_scene[None, ...].to(self.vlm.device)
@@ -322,41 +336,51 @@ class CogACT(nn.Module):
             pixel_values_left = {k: v[None, ...].to(self.vlm.device) for k, v in pixel_values_left.items()}
         else:
             raise ValueError(f"Unsupported `pixel_values` type = {type(pixel_values_left)}")
-        
-        pixel_values_right = image_transform(image_hand_right)
-        if isinstance(pixel_values_right, torch.Tensor):
-            pixel_values_right = pixel_values_right[None, ...].to(self.vlm.device)
-        elif isinstance(pixel_values_right, dict):
-            pixel_values_right = {k: v[None, ...].to(self.vlm.device) for k, v in pixel_values_right.items()}
-        else:
-            raise ValueError(f"Unsupported `pixel_values` type = {type(pixel_values_right)}")
-        pixel_values = {"scene" : pixel_values_scene, "left" : pixel_values_left, "right" : pixel_values_right}
+
+        pixel_values = {"scene" : pixel_values_scene, "left" : pixel_values_left}
+        pixel_utils = []
+        for util_image in utils:
+            util_image = image_transform(util_image)
+            util_image = {k: v[None, ...].to(self.vlm.device) for k, v in util_image.items()}
+            pixel_utils.append(util_image)
+
+        keys = pixel_utils[0].keys()
+        pixel_utils = {k: torch.cat([d[k] for d in pixel_utils], dim=0) for k in keys}
+        pixel_utils = [pixel_utils]    # add the batch dimension 
 
         # Invoke super().generate --> taps into `GenerationMixin` which (redirects) to `forward()`
         autocast_dtype = self.vlm.llm_backbone.half_precision_dtype
 
         # Generate cognition feature through vlm
+        # We don't need to compute LM loss here
+        labels = torch.ones_like(input_ids).to(self.vlm.device) * IGNORE_INDEX
+        attention_mask = torch.ones_like(input_ids, dtype=torch.bool).to(self.vlm.device)
+        robot_obs = torch.Tensor(robot_obs).unsqueeze(0).to(self.vlm.device)
+        robot_obs = self.state_proj(robot_obs)
         with torch.autocast("cuda", dtype=autocast_dtype, enabled=self.vlm.enable_mixed_precision_training):
             # fmt: off
-            output = super(PrismaticVLM, self.vlm).generate(
+            output = self.vlm.forward(
                 input_ids=input_ids,                            # Shape: [1, seq]
+                attention_mask=attention_mask,
                 pixel_values=pixel_values,                      # Shape: [1, 3, res, res] or Dict[str, ...]
-                max_new_tokens=1,
+                pixel_utils=pixel_utils,
+                labels=labels,
                 output_hidden_states=True, 
-                return_dict_in_generate=True,
                 **kwargs
             )
             # fmt: on
 
         # Extract cognition feature
-        cognition_features = output.hidden_states[0][-1][:,-1,:]
+        cognition_features = output.hidden_states[-1][:,-1,:]
         assert (cognition_features.shape[0], cognition_features.shape[1]) == (1,4096), "Batch size must be 1 for action prediction"
         using_cfg = cfg_scale > 1.0
 
         model_dtype = next(self.action_model.net.parameters()).dtype
         B = cognition_features.shape[0]
 
-        cognition_features = cognition_features.unsqueeze(1).to(model_dtype)  # [B, 1, D]
+        cognition_features = cognition_features.unsqueeze(1).to(model_dtype)    # [B, 1, D]
+        robot_obs = robot_obs.unsqueeze(1).to(model_dtype)                      # [B, 1, D]
+        cognition_features = torch.cat([cognition_features, robot_obs], dim=1)  # [B, 2, D]
 
         # Sample random noise
         noise = torch.randn(B, self.future_action_window_size+1, self.action_model.in_channels, device=cognition_features.device).to(model_dtype)  #[B, T, D]
@@ -366,7 +390,7 @@ class CogACT(nn.Module):
             noise = torch.cat([noise, noise], 0)
             uncondition = self.action_model.net.z_embedder.uncondition
             uncondition = uncondition.unsqueeze(0)  #[1, D]
-            uncondition = uncondition.expand(B, 1, -1) #[B, 1, D]
+            uncondition = uncondition.expand(cognition_features.shape[0], cognition_features.shape[1], -1) #[B, 1, D]
             z = torch.cat([cognition_features, uncondition], 0)
             cfg_scale = cfg_scale
             model_kwargs = dict(z=z, cfg_scale=cfg_scale)
@@ -407,7 +431,7 @@ class CogACT(nn.Module):
         mask = action_norm_stats.get("mask", np.ones_like(action_norm_stats["q01"], dtype=bool))
         action_high, action_low = np.array(action_norm_stats["q99"]), np.array(action_norm_stats["q01"])
         normalized_actions = np.clip(normalized_actions, -1, 1)
-        normalized_actions[:, 6] = np.where(normalized_actions[:, 6] < 0.3, 0, 1) 
+        normalized_actions[:, 6] = np.where(normalized_actions[:, 6] < 0.75, 0, 1) 
         actions = np.where(
             mask,
             0.5 * (normalized_actions + 1) * (action_high - action_low) + action_low,

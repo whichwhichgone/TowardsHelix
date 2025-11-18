@@ -307,6 +307,7 @@ class TrainingStrategy(ABC):
                             labels=batch["labels"],
                             output_hidden_states = True,
                             repeated_diffusion_steps = 8,
+                            state=batch["state"],
                         )
                     else:
                         # [Contract] self.vlm.forward() must automatically compute `loss` and return!
@@ -337,6 +338,7 @@ class TrainingStrategy(ABC):
                         update_ema(self.vlm.ema_diffusion, self.vlm.action_model)
                     self.optimizer.zero_grad()
                     # Compute epoch value using number of completed gradient steps
+                    prev_step_epoch = metrics.global_step // (len(vla_dataset) // self.global_batch_size)
                     epoch = (metrics.global_step + 1) // (len(vla_dataset) // self.global_batch_size)
 
                     # Push Metrics
@@ -345,7 +347,7 @@ class TrainingStrategy(ABC):
 
                     # Check for Save Interval or Max Steps & Save Checkpoint
                     if (terminate := (self.max_steps is not None and metrics.global_step >= self.max_steps)) or (
-                        (metrics.global_step % save_interval) == 0
+                        (metrics.global_step % save_interval) == 0 or (epoch - prev_step_epoch == 1)
                     ):
                         self.save_checkpoint(
                             metrics.run_dir, metrics.global_step, epoch, loss.item(), only_trainable=not save_full_model

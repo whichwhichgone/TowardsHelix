@@ -168,8 +168,9 @@ def load_vla(
 
     # Load VLA Config (and corresponding base VLM `ModelConfig`) from `config.json`
     with open(config_json, "r") as f:
-        vla_cfg = json.load(f)["vla"]
-        model_cfg = ModelConfig.get_choice_class(vla_cfg["base_vlm"])()
+        base_vlm = json.load(f)["vla"]["base_vlm"]
+        base_vlm = os.path.basename(base_vlm) if os.path.isdir(base_vlm) else base_vlm
+        model_cfg = ModelConfig.get_choice_class(base_vlm)()
 
     # Load Dataset Statistics for Action Denormalization
     with open(dataset_statistics_json, "r") as f:
