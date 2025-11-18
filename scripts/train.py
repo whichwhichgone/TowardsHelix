@@ -244,7 +244,6 @@ def train(cfg: TrainConfig) -> None:
     dist.barrier()
     # Create Train Strategy
     overwatch.info(f"Initializing Train Strategy `{cfg.train_strategy}`")
-    vla.llm_backbone.llm.resize_token_embeddings(len(vla.llm_backbone.get_tokenizer()))
     train_strategy = get_train_strategy(
         train_strategy=cfg.train_strategy,
         vlm=vla,
