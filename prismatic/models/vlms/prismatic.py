@@ -16,10 +16,12 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Type, Union
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image
 from torch.distributed.fsdp.wrap import _module_wrap_policy, _or_policy
 from transformers.modeling_outputs import CausalLMOutputWithPast
+from einops import rearrange
 
 from prismatic.models.backbones.llm import LLMBackbone
 from prismatic.models.backbones.llm.prompting import PromptBuilder
@@ -67,6 +69,7 @@ class PrismaticVLM(VLM):
             self.projector = MLPProjector(vision_backbone.embed_dim, llm_backbone.embed_dim)
         else:
             raise ValueError(f"PrismaticVLM with `{arch_specifier = }` is not supported!")
+        # self.resampler = nn.AdaptiveAvgPool2d((12, 12))
 
         # Trackers
         self.vision_backbone_requires_grad = False
@@ -391,7 +394,11 @@ class PrismaticVLM(VLM):
             if isinstance(pixel_values, dict):
                 ### iterate the dict for imgs from different views
                 for view_key, view_value in pixel_values.items():
-                    pixel_values[view_key] = self.vision_backbone({k: view_value[k][multimodal_indices] for k in view_value})
+                    vision_features = self.vision_backbone({k: view_value[k][multimodal_indices] for k in view_value})
+                    # vision_features = rearrange(vision_features, 'b (h w) c -> b c h w', h=16, w=16)
+                    # vision_features = self.resampler(vision_features)
+                    # vision_features = rearrange(vision_features, 'b c h w -> b (h w) c')
+                    pixel_values[view_key] = vision_features
                 # patch_features = self.vision_backbone({k: pixel_values[k][multimodal_indices] for k in pixel_values})
                 patch_features = torch.concat([feature for feature in pixel_values.values()], dim=1)
             else:
@@ -402,6 +409,9 @@ class PrismaticVLM(VLM):
             for instance in pixel_utils:
                 if isinstance(instance, dict):
                     patch_instance = self.vision_backbone(instance)
+                    # patch_instance = rearrange(patch_instance, 'b (h w) c -> b c h w', h=16, w=16)
+                    # patch_instance = self.resampler(patch_instance)
+                    # patch_instance = rearrange(patch_instance, 'b c h w -> b (h w) c')
                     patch_utils.append(patch_instance)
                 else:
                     raise ValueError(f"Not support type {type(instance)} in pixel_utils")
