@@ -145,15 +145,16 @@ class CogACT(nn.Module):
             raise ValueError("No vision backbone found")
         
         # since using three input images, the num_patch should be 3 times the original 
-        last_hidden = last_hidden[:, num_patch * 2 :]
+        last_vision_hidden = last_hidden[:, 1: num_patch * 2 + 1]
+        last_lang_hidden = torch.cat([last_hidden[:, :1], last_hidden[:, num_patch * 2 + 1:]], dim=1)
 
         # extract the cognition feature
         cumulative_sum = attention_mask.cumsum(dim=1)
         last_true_indices = (cumulative_sum == cumulative_sum.max(dim=1, keepdim=True)[0]).float().argmax(dim=1)  
-        expanded_indices = last_true_indices.unsqueeze(-1).expand(-1, last_hidden.size(-1))  
-        cognition_features = last_hidden.gather(1, expanded_indices.unsqueeze(1))   # [B, 1, D]
-        state_features = self.state_proj(state)                                     # [B, 1, D]
-        cognition_features = torch.cat([cognition_features, state_features], dim=1) # [B, 2, D]
+        expanded_indices = last_true_indices.unsqueeze(-1).expand(-1, last_lang_hidden.size(-1))  
+        cognition_features = last_lang_hidden.gather(1, expanded_indices.unsqueeze(1))                       # [B, 1, D]
+        state_features = self.state_proj(state)                                                              # [B, 1, D]
+        cognition_features = torch.cat([last_vision_hidden, cognition_features, state_features], dim=1)      # [B, 512 + 2, D]
 
         actions_history = actions[:,0:self.past_action_window_size,:]
         actions_future = actions[:, -(self.future_action_window_size+1):, :]

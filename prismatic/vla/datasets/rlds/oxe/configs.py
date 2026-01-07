@@ -719,6 +719,19 @@ OXE_DATASET_CONFIGS = {
         "action_encoding": ActionEncoding.JOINT_POS_PIPER_SINGLE,
     },
 
+    # for piper_arrange dataset
+    "piper_arrange": {
+        "image_obs_keys": {
+            "primary": "image",
+            "secondary": "hand_image_right",
+            "wrist": "hand_image_right",
+        },
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["state"],
+        "state_encoding": StateEncoding.JOINT_PIPER_SINGLE,
+        "action_encoding": ActionEncoding.JOINT_POS_PIPER_SINGLE,
+    },
+
     # for piper_oe dataset
     "piper_oe_nolang": {
         "image_obs_keys": {

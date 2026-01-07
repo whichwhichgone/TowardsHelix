@@ -112,6 +112,7 @@ class TrainConfig:
         assert (
             self.vla.expected_world_size == overwatch.world_size()
         ), f"Expected World Size = {self.vla.expected_world_size} but Found {overwatch.world_size()} GPUs!"
+        assert self.epochs is not None or self.max_steps is not None, "Either `epochs` or `max_steps` must be specified!"
 
     # fmt: on
 

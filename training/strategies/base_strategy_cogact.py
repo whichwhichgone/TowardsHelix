@@ -275,7 +275,11 @@ class TrainingStrategy(ABC):
         # === Train ===
         status = metrics.get_status()
         with tqdm(
-            total=(self.epochs * (len(dataloader) // self.grad_accumulation_steps)) if self.max_steps is None else self.max_steps,
+            total=(
+                self.epochs * (len(dataloader) // metrics.hparams["vla"]["expected_world_size"] // self.grad_accumulation_steps)
+                if self.max_steps is None
+                else self.max_steps
+            ),
             desc=status,
             leave=False,
             disable=not overwatch.is_rank_zero(),
@@ -346,15 +350,23 @@ class TrainingStrategy(ABC):
                     status = metrics.push()
 
                     # Check for Save Interval or Max Steps & Save Checkpoint
-                    if (terminate := (self.max_steps is not None and metrics.global_step >= self.max_steps)) or (
-                        (metrics.global_step % save_interval) == 0 or (epoch - prev_step_epoch == 1)
-                    ):
+                    if self.max_steps is not None:
+                        should_terminate = metrics.global_step >= self.max_steps
+                    else:
+                        should_terminate = self.epochs is not None and epoch >= self.epochs
+
+                    should_save = (
+                        (metrics.global_step % save_interval) == 0 or 
+                        (epoch - prev_step_epoch == 1)
+                    )
+
+                    if should_terminate or should_save:
                         self.save_checkpoint(
                             metrics.run_dir, metrics.global_step, epoch, loss.item(), only_trainable=not save_full_model
                         )
                         dist.barrier()
 
-                    if terminate:
+                    if should_terminate:
                         return
 
                 # Update Progress Bar

@@ -94,7 +94,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model-path",
         type=str,
-        default="/zhaowei/workspace/CogACT/logs/piper_oe_state_lr1.5_large_nolang/checkpoints/step-008328-epoch-02-loss=0.0116.pt",
+        default="/zhaowei/workspace/CogACT/logs/piper_oe_1000/checkpoints/step-004678-epoch-02-loss=0.0205.pt",
     )
     parser.add_argument(
         "--load-for-training",
