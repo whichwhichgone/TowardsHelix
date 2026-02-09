@@ -116,10 +116,10 @@ class RLDSBatchTransform:
 class RLDSBatchTransformOe(RLDSBatchTransform):
 
     def __post_init__(self):
-        special_tokens = {"additional_special_tokens": ["<oe>"]}
+        special_tokens = {"additional_special_tokens": ["<oe>"] + [f"<vq_{i}>" for i in range(1024)] + ["<vq_end>"]}
         num_added = self.base_tokenizer.add_special_tokens(special_tokens)
         if num_added > 0:
-            print(f"Added {num_added} special tokens to the tokenizer: {special_tokens['additional_special_tokens']}")
+            print(f"Added {num_added} special tokens to the tokenizer.")
 
     def decode_utils(self, byte_utils):
         img_utils = []
@@ -210,7 +210,11 @@ class RLDSBatchTransformOe(RLDSBatchTransform):
             prompt_builder.add_turn(turn["from"], turn["value"])
 
         # Tokenize (w/ `base_tokenizer`)
+        goal_indices = rlds_batch["task_goal"].tolist()
+        goal_tokens = [f"<vq_{idx}>" for idx in goal_indices] + ["<vq_end>"]
         input_ids = self.base_tokenizer(prompt_builder.get_prompt(), add_special_tokens=True).input_ids
+        goal_suffix = self.base_tokenizer("".join(goal_tokens), add_special_tokens=False).input_ids
+        #input_ids = input_ids + goal_suffix
         labels = list(input_ids)
 
         # Tensorize =>> Run Image Transform to get `pixel_values` =>> Return

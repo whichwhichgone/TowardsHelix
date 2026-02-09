@@ -30,6 +30,7 @@ import wandb
 
 import sys
 sys.path.insert(0, ".")
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 from prismatic.overwatch import initialize_overwatch
 from prismatic.util import set_global_seed
 from prismatic.vla import get_vla_dataset_and_collator

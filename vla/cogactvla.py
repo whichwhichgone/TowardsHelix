@@ -62,6 +62,7 @@ class CogACT(nn.Module):
                                             future_action_window_size = future_action_window_size, 
                                             past_action_window_size = past_action_window_size)
         self.state_proj = nn.Linear(7, token_size, bias=False)
+        self.hidden_proj = nn.Linear(vlm.llm_backbone.embed_dim, 768, bias=False)
         self.vlm = vlm
         self.future_action_window_size = future_action_window_size
         self.past_action_window_size = past_action_window_size
@@ -69,14 +70,14 @@ class CogACT(nn.Module):
         if self.use_ema:
             self.ema_diffusion = deepcopy(self.action_model)
             self.ema_diffusion.requires_grad_(False)
-            self.all_module_keys = ['action_model', 'ema_diffusion', 'state_proj']
+            self.all_module_keys = ['action_model', 'ema_diffusion', 'state_proj', 'hidden_proj']
         else:
-            self.all_module_keys = ['action_model', 'state_proj']
+            self.all_module_keys = ['action_model', 'state_proj', 'hidden_proj']
         for module_keys in self.vlm.all_module_keys:
             self.all_module_keys.append("vlm." + module_keys)
 
         # Diffusion head is always trainable
-        self._trainable_module_keys = ['action_model', 'state_proj']
+        self._trainable_module_keys = ['action_model', 'state_proj', 'hidden_proj']
         self.norm_stats = norm_stats
 
     @property
@@ -135,6 +136,7 @@ class CogACT(nn.Module):
         # extract the last hidden state and the learnable EOS token feature
         last_hidden = output.hidden_states[-1]
         attention_mask = output["oe_attention_mask"]
+        fused_attention_mask = ~output["fused_attention_mask"]
 
         # extract the visual token number
         if self.vlm.vision_backbone.featurizer is not None:
@@ -144,8 +146,7 @@ class CogACT(nn.Module):
         else:
             raise ValueError("No vision backbone found")
         
-        # since using three input images, the num_patch should be 3 times the original 
-        last_vision_hidden = last_hidden[:, 1: num_patch * 2 + 1]
+        # since using three input images, the num_patch should be 3 times the original
         last_lang_hidden = torch.cat([last_hidden[:, :1], last_hidden[:, num_patch * 2 + 1:]], dim=1)
 
         # extract the cognition feature
@@ -154,7 +155,8 @@ class CogACT(nn.Module):
         expanded_indices = last_true_indices.unsqueeze(-1).expand(-1, last_lang_hidden.size(-1))  
         cognition_features = last_lang_hidden.gather(1, expanded_indices.unsqueeze(1))                       # [B, 1, D]
         state_features = self.state_proj(state)                                                              # [B, 1, D]
-        cognition_features = torch.cat([last_vision_hidden, cognition_features, state_features], dim=1)      # [B, 512 + 2, D]
+        hidden_features = self.hidden_proj(last_hidden)                                                     
+        cognition_features = torch.cat([state_features], dim=1)                                              # [B, 512 + 2, D]
 
         actions_history = actions[:,0:self.past_action_window_size,:]
         actions_future = actions[:, -(self.future_action_window_size+1):, :]
@@ -163,9 +165,11 @@ class CogACT(nn.Module):
         actions_repeated = actions_future.repeat(repeated_diffusion_steps, 1, 1)
         actions_history_repeated = actions_history.repeat(repeated_diffusion_steps, 1, 1)
         cognition_features_repeated = cognition_features.repeat(repeated_diffusion_steps, 1, 1) # [repeated_diffusion_steps*B, 1, D]
+        hidden_features_repeated = hidden_features.repeat(repeated_diffusion_steps, 1, 1)
+        hidden_mask_repeated = fused_attention_mask.repeat(repeated_diffusion_steps, 1)
 
         # Action model forward and compute loss
-        loss = self.action_model.loss(actions_repeated, cognition_features_repeated)
+        loss = self.action_model.loss(actions_repeated, cognition_features_repeated, context=hidden_features_repeated, context_mask=hidden_mask_repeated)
         return loss, output
 
     def get_fsdp_wrapping_policy(self) -> Callable:
@@ -233,7 +237,13 @@ class CogACT(nn.Module):
         ), "PrismaticVLM `from_pretrained` expects checkpoint with keys for `projector` AND `llm_backbone`!"
 
         vlm.projector.load_state_dict(model_state_dict["projector"])
-        vlm.llm_backbone.load_state_dict(model_state_dict["llm_backbone"])
+        
+        # Load llm_backbone with shape mismatch tolerance (e.g., resized token embeddings)
+        llm_ckpt = model_state_dict["llm_backbone"]
+        llm_current = vlm.llm_backbone.state_dict()
+        llm_filtered = {k: v for k, v in llm_ckpt.items() if k in llm_current and llm_current[k].shape == v.shape}
+        vlm.llm_backbone.load_state_dict(llm_filtered, strict=False)
+        
         if "vision_backbone" in model_state_dict.keys():
             vlm.vision_backbone.load_state_dict(model_state_dict["vision_backbone"])
 
@@ -259,6 +269,14 @@ class CogACT(nn.Module):
                 overwatch.info("Successfully loaded state_proj weights from the pretrained checkpoint.")
             except Exception as e:
                 overwatch.warning(f"Failed to load state_proj weights: {e}. Initializing with random weights.")
+        
+        # Load Hidden projector from Checkpoint
+        if "hidden_proj" in model_state_dict:
+            try:
+                cogact.hidden_proj.load_state_dict(model_state_dict["hidden_proj"])
+                overwatch.info("Successfully loaded hidden_proj weights from the pretrained checkpoint.")
+            except Exception as e:
+                overwatch.warning(f"Failed to load hidden_proj weights: {e}. Initializing with random weights.")
 
         # Load ActionModel from Checkpoint
         if "action_model" in model_state_dict:
@@ -302,7 +320,8 @@ class CogACT(nn.Module):
         @return Unnormalized (continuous) action vector --> end-effector deltas.
         """
         image_transform, tokenizer = self.vlm.vision_backbone.image_transform, self.vlm.llm_backbone.tokenizer
-        tokenizer.add_special_tokens({'additional_special_tokens': ['<oe>']})
+        special_tokens = {"additional_special_tokens": ["<oe>"] + [f"<vq_{i}>" for i in range(1024)] + ["<vq_end>"]}
+        tokenizer.add_special_tokens(special_tokens)
 
         # Build VLA Prompt
         prompt_builder = self.vlm.get_prompt_builder()
@@ -360,6 +379,17 @@ class CogACT(nn.Module):
         robot_obs = self.state_proj(robot_obs)
         with torch.autocast("cuda", dtype=autocast_dtype, enabled=self.vlm.enable_mixed_precision_training):
             # fmt: off
+            '''
+            output = super(PrismaticVLM, self.vlm).generate(
+                input_ids=input_ids,                            # Shape: [1, seq]
+                pixel_values=pixel_values,                      # Shape: [1, 3, res, res] or Dict[str, ...]
+                pixel_utils=pixel_utils,
+                max_new_tokens=1,
+                output_hidden_states=True,
+                return_dict_in_generate=True,
+                **kwargs,
+            )
+            '''
             output = self.vlm.forward(
                 input_ids=input_ids,                            # Shape: [1, seq]
                 attention_mask=attention_mask,
@@ -371,6 +401,18 @@ class CogACT(nn.Module):
             )
             # fmt: on
 
+        # extract the last hidden state and the learnable EOS token feature
+        last_hidden = output.hidden_states[-1]
+        fused_attention_mask = ~output["fused_attention_mask"]
+
+        # extract the visual token number
+        if self.vlm.vision_backbone.featurizer is not None:
+            num_patch = self.vlm.vision_backbone.featurizer.patch_embed.num_patches
+        elif hasattr(self.vlm.vision_backbone, 'siglip_featurizer') and self.vlm.vision_backbone.siglip_featurizer is not None:
+            num_patch = self.vlm.vision_backbone.siglip_featurizer.patch_embed.num_patches
+        else:
+            raise ValueError("No vision backbone found")
+        
         # Extract cognition feature
         cognition_features = output.hidden_states[-1][:,-1,:]
         assert (cognition_features.shape[0], cognition_features.shape[1]) == (1,4096), "Batch size must be 1 for action prediction"
@@ -381,7 +423,8 @@ class CogACT(nn.Module):
 
         cognition_features = cognition_features.unsqueeze(1).to(model_dtype)    # [B, 1, D]
         robot_obs = robot_obs.unsqueeze(1).to(model_dtype)                      # [B, 1, D]
-        cognition_features = torch.cat([cognition_features, robot_obs], dim=1)  # [B, 2, D]
+        cognition_features = torch.cat([robot_obs], dim=1)  # [B, 2, D]
+        hidden_features = self.hidden_proj(last_hidden)  
 
         # Sample random noise
         noise = torch.randn(B, self.future_action_window_size+1, self.action_model.in_channels, device=cognition_features.device).to(model_dtype)  #[B, T, D]
@@ -393,11 +436,13 @@ class CogACT(nn.Module):
             uncondition = uncondition.unsqueeze(0)  #[1, D]
             uncondition = uncondition.expand(cognition_features.shape[0], cognition_features.shape[1], -1) #[B, 1, D]
             z = torch.cat([cognition_features, uncondition], 0)
+            hidden_features = torch.cat([hidden_features, hidden_features], 0)
+            fused_attention_mask = torch.cat([fused_attention_mask, fused_attention_mask], 0)
             cfg_scale = cfg_scale
-            model_kwargs = dict(z=z, cfg_scale=cfg_scale)
+            model_kwargs = dict(z=z, cfg_scale=cfg_scale, context=hidden_features, context_mask=fused_attention_mask)
             sample_fn = self.action_model.net.forward_with_cfg
         else:
-            model_kwargs = dict(z=cognition_features)
+            model_kwargs = dict(z=cognition_features, context=hidden_features, context_mask=fused_attention_mask)
             sample_fn = self.action_model.net.forward
 
         # DDIM Sampling

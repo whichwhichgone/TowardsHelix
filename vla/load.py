@@ -104,6 +104,7 @@ def load(
 
     # Load VLM using `from_pretrained` (clobbers HF syntax... eventually should reconcile)
     overwatch.info(f"Loading VLM [bold blue]{model_cfg['model_id']}[/] from Checkpoint")
+    llm_backbone.llm.resize_token_embeddings(len(tokenizer) + 1 + 1024 + 1)
     vlm = PrismaticVLM.from_pretrained(
         checkpoint_pt,
         model_cfg["model_id"],
@@ -204,6 +205,7 @@ def load_vla(
 
     # Load VLM using `from_pretrained` (clobbers HF syntax... eventually should reconcile)
     overwatch.info(f"Loading VLA [bold blue]{model_cfg.model_id}[/] from Checkpoint")
+    llm_backbone.llm.resize_token_embeddings(len(tokenizer) + 1 + 1024 + 1)
 
     vla = CogACT.from_pretrained(
         checkpoint_pt,

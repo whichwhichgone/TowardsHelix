@@ -78,7 +78,7 @@ class VLAServer:
                 img_all,
                 img_utils,
                 oe_lang,
-                unnorm_key='piper_oe_nolang',
+                unnorm_key='piper_oe',
                 cfg_scale=1.5,
                 use_ddim=True,
                 num_ddim_steps=10,
@@ -94,7 +94,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model-path",
         type=str,
-        default="/zhaowei/workspace/CogACT/logs/piper_oe_1000/checkpoints/step-004678-epoch-02-loss=0.0205.pt",
+        default="/zhaowei/workspace/CogACT/logs/piper_oe_crossattn--image_aug/checkpoints/step-010160-epoch-04-loss=0.0105.pt",
     )
     parser.add_argument(
         "--load-for-training",
@@ -206,8 +206,8 @@ if __name__ == "__main__":
             robot_obs_norm = os.path.dirname(os.path.dirname(args.model_path)) + "/dataset_statistics.json"
             with open(robot_obs_norm, 'r') as f:
                 norm_stats = json.load(f)
-            robot_obs_low = np.array(norm_stats["piper_oe_nolang"]["proprio"]["q01"])
-            robot_obs_high = np.array(norm_stats["piper_oe_nolang"]["proprio"]["q99"])
+            robot_obs_low = np.array(norm_stats["piper_oe"]["proprio"]["q01"])
+            robot_obs_high = np.array(norm_stats["piper_oe"]["proprio"]["q99"])
             robot_obs = np.array(robot_obs)
             robot_obs = np.clip(2 * (robot_obs - robot_obs_low) / (robot_obs_high - robot_obs_low + 1e-8) - 1, -1, 1)
             action = vla_robot.generate_action(img_all, img_utils, oe_lang, robot_obs).reshape(-1)

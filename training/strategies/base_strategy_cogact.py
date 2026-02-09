@@ -280,6 +280,7 @@ class TrainingStrategy(ABC):
                 if self.max_steps is None
                 else self.max_steps
             ),
+            initial=metrics.global_step,
             desc=status,
             leave=False,
             disable=not overwatch.is_rank_zero(),

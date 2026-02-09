@@ -531,6 +531,7 @@ class PrismaticVLM(VLM):
         )
         # store the original attention mask for open-ended instructions
         output["oe_attention_mask"] = attention_mask
+        output["fused_attention_mask"] = fused_attention_mask
         return output
 
     # === GenerationMixin Methods ===
@@ -543,6 +544,7 @@ class PrismaticVLM(VLM):
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         pixel_values: Optional[torch.FloatTensor] = None,
+        pixel_utils: Optional[Dict[str, torch.Tensor]] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         past_key_values: Optional[List[torch.FloatTensor]] = None,
         use_cache: Optional[bool] = None,
@@ -563,6 +565,7 @@ class PrismaticVLM(VLM):
             {
                 "attention_mask": attention_mask,
                 "pixel_values": pixel_values,
+                "pixel_utils": pixel_utils,
                 "past_key_values": past_key_values,
                 "use_cache": use_cache,
             }
@@ -678,45 +681,48 @@ class PrismaticVLM(VLM):
         Converts placeholder input IDs to utility embeddings using provided patch utilities.
         Args:
             input_ids (Torch.Tensor): The input IDs to be processed, (N, Tx).
-            labels (Torch.Tensor): The labels corresponding to the input IDs, (N, Tx).
+            labels (Torch.Tensor | None): The labels corresponding to the input IDs, (N, Tx), or None.
             attention_mask (Torch.Tensor): The attention mask for the input IDs, (N, Tx).
             patch_utils (List[Torch.Tensor]): A collection of patch utilities used for processing, (M, P, D).
         Returns:
             fused_input_embeds (Torch.Tensor): The resulting utility embeddings, (N, Ty, D).
-            fused_labels (Torch.Tensor): The resulting labels, (N, Ty).
+            fused_labels (Torch.Tensor | None): The resulting labels, (N, Ty), or None if input labels is None.
             fused_attention_mask (Torch.Tensor): The resulting attention mask, (N, Ty).
         """
         assert len(patch_utils) == input_ids.shape[0]
         input_embeds = self.llm_backbone.embed_input_ids(input_ids)
-        fused_input_embeds, fused_labels, fused_attention_mask = [], [], []
+        has_labels = labels is not None
+        fused_input_embeds, fused_labels, fused_attention_mask = [], [] if has_labels else None, []
         max_length = 0
         for idx, util_sample in enumerate(patch_utils):
             input_id = input_ids[idx]
             input_embed = input_embeds[idx]
-            label = labels[idx]
+            label = labels[idx] if has_labels else None
             mask = attention_mask[idx]
             placeholder = torch.where(input_id == 32001)[0].tolist() # 32001 is the placeholder token ID
             placeholder.insert(0, -1)
             placeholder.append(len(input_id))
 
-            embed_splits, label_splits, mask_splits = [], [], []
+            embed_splits, label_splits, mask_splits = [], [] if has_labels else None, []
             for elem_idx in range(len(placeholder) - 1):
                 start = placeholder[elem_idx] + 1
                 end = placeholder[elem_idx + 1]
                 embed_splits.append(input_embed[start:end])
-                label_splits.append(label[start:end])
+                if has_labels:
+                    label_splits.append(label[start:end])
                 mask_splits.append(mask[start:end])
 
-            assert len(label_splits) == len(embed_splits) and len(mask_splits) == len(embed_splits)
+            assert (not has_labels or len(label_splits) == len(embed_splits)) and len(mask_splits) == len(embed_splits)
             num_patches = util_sample.shape[1]
 
-            fused_input_embed, fused_label, fused_mask = [], [], []
+            fused_input_embed, fused_label, fused_mask = [], [] if has_labels else None, []
             if len(embed_splits) == 1:
                 # special case only for supporting fsdp, this is required for program running without error
                 fused_input_embed.append(embed_splits[0][0:0])
                 fused_input_embed.append(util_sample[0][0:0])
-                fused_label.append(label_splits[0][0:0])
-                fused_label.append(torch.full((0,), IGNORE_INDEX, dtype=label.dtype, device=label.device))
+                if has_labels:
+                    fused_label.append(label_splits[0][0:0])
+                    fused_label.append(torch.full((0,), IGNORE_INDEX, dtype=label.dtype, device=label.device))
                 fused_mask.append(mask_splits[0][0:0])
                 fused_mask.append(torch.full((0,), 1, dtype=mask.dtype, device=mask.device))
             else:
@@ -724,33 +730,39 @@ class PrismaticVLM(VLM):
                 for elem_idx in range(0, len(embed_splits) - 1):
                     fused_input_embed.append(embed_splits[elem_idx])
                     fused_input_embed.append(util_sample[elem_idx])
-                    fused_label.append(label_splits[elem_idx])
-                    fused_label.append(torch.full((num_patches,), IGNORE_INDEX, dtype=label.dtype, device=label.device))
+                    if has_labels:
+                        fused_label.append(label_splits[elem_idx])
+                        fused_label.append(torch.full((num_patches,), IGNORE_INDEX, dtype=label.dtype, device=label.device))
                     fused_mask.append(mask_splits[elem_idx])
                     fused_mask.append(torch.full((num_patches,), 1, dtype=mask.dtype, device=mask.device))
             # last part of the splits 
             fused_input_embed.append(embed_splits[-1])
-            fused_label.append(label_splits[-1])
+            if has_labels:
+                fused_label.append(label_splits[-1])
             fused_mask.append(mask_splits[-1])
 
             fused_input_embed = torch.cat(fused_input_embed, dim=0)
-            fused_label = torch.cat(fused_label, dim=0)
+            if has_labels:
+                fused_label = torch.cat(fused_label, dim=0)
             fused_mask = torch.cat(fused_mask, dim=0)
             if fused_input_embed.shape[0] > max_length:
                     max_length = fused_input_embed.shape[0]
 
             fused_input_embeds.append(fused_input_embed)
-            fused_labels.append(fused_label)
+            if has_labels:
+                fused_labels.append(fused_label)
             fused_attention_mask.append(fused_mask)
 
         assert max_length != 0, "Max length must not be zero."
         for idx in range(len(fused_input_embeds)):
             fused_input_embeds[idx] = F.pad(fused_input_embeds[idx], (0, 0, 0, max_length - fused_input_embeds[idx].shape[0]))
-            fused_labels[idx] = F.pad(fused_labels[idx], (0, max_length - fused_labels[idx].shape[0]), value=IGNORE_INDEX)
+            if has_labels:
+                fused_labels[idx] = F.pad(fused_labels[idx], (0, max_length - fused_labels[idx].shape[0]), value=IGNORE_INDEX)
             fused_attention_mask[idx] = F.pad(fused_attention_mask[idx], (0, max_length - fused_attention_mask[idx].shape[0]), value=0)
 
         fused_input_embeds = torch.stack(fused_input_embeds, dim=0)
-        fused_labels = torch.stack(fused_labels, dim=0)
+        if has_labels:
+            fused_labels = torch.stack(fused_labels, dim=0)
         fused_attention_mask = torch.stack(fused_attention_mask, dim=0)
 
         return fused_input_embeds, fused_labels, fused_attention_mask

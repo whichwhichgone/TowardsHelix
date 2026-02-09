@@ -4,8 +4,8 @@ import tensorflow_datasets as tfds
 import numpy as np
 
 
-dst_path = '/liujinxin/code/rlds_dataset_builder/tensorflow_datasets'
-builder = tfds.builder('dummy_data_ur5', data_dir=dst_path)
+dst_path = '/zhaowei/data'
+builder = tfds.builder('piper_oe', data_dir=dst_path)
 ds = builder.as_dataset(split='train', shuffle_files=False)
 
 for example in ds.take(1):

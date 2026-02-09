@@ -120,6 +120,29 @@ class HistoryEmbedder(nn.Module):
 #                                 Core DiT Model                                #
 #################################################################################
 
+class CrossAttention(nn.Module):
+    """
+    Cross-attention module using PyTorch's MultiheadAttention.
+    Query comes from x, Key and Value come from context.
+    """
+    def __init__(self, hidden_size, num_heads):
+        super().__init__()
+        self.norm = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.attn = nn.MultiheadAttention(hidden_size, num_heads, batch_first=True)
+
+    def forward(self, x, context, context_mask=None):
+        """
+        Args:
+            x: (B, N, C) tensor - query source
+            context: (B, M, C) tensor - key/value source
+            context_mask: (B, M) bool tensor - True for positions to be masked (padding positions)
+        Returns:
+            (B, N, C) tensor
+        """
+        x_norm = self.norm(x)
+        out, _ = self.attn(x_norm, context, context, key_padding_mask=context_mask)
+        return out
+
 class DiTBlock(nn.Module):
     """
     A DiT block with self-attention conditioning.
@@ -128,13 +151,17 @@ class DiTBlock(nn.Module):
         super().__init__()
         self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.attn = Attention(hidden_size, num_heads=num_heads, qkv_bias=True, **block_kwargs)
+        self.cross_attn = CrossAttention(hidden_size, num_heads)
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
         approx_gelu = lambda: nn.GELU(approximate="tanh")
         self.mlp = Mlp(in_features=hidden_size, hidden_features=mlp_hidden_dim, act_layer=approx_gelu, drop=0)
 
-    def forward(self, x):
+    def forward(self, x, context=None, context_mask=None):
         x = x + self.attn(self.norm1(x))
+        if context is not None:
+            assert context_mask is not None, "Error: context_mask is required when context is provided."
+            x = x + self.cross_attn(x, context, context_mask=context_mask)
         x = x + self.mlp(self.norm2(x))
         return x
 
@@ -194,7 +221,7 @@ class DiT(nn.Module):
         # Learnable positional embeddings
         # +2, one for the conditional token, and one for the current action prediction
         self.positional_embedding = nn.Parameter(
-                scale * torch.randn(future_action_window_size + past_action_window_size + 1 + 2 + 512, hidden_size))
+                scale * torch.randn(future_action_window_size + past_action_window_size + 1 + 1, hidden_size))
 
         self.blocks = nn.ModuleList([
             DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
@@ -231,7 +258,7 @@ class DiT(nn.Module):
         nn.init.constant_(self.final_layer.linear.weight, 0)
         nn.init.constant_(self.final_layer.linear.bias, 0)
 
-    def forward(self, x, t, z):
+    def forward(self, x, t, z, context=None, context_mask=None):
         """
         Forward pass of DiT.
         history: (N, H, D) tensor of action history # not used now
@@ -246,11 +273,11 @@ class DiT(nn.Module):
         x = torch.cat((c, x), dim=1)                        # (N, T+1, D)
         x = x + self.positional_embedding                   # (N, T+1, D)
         for block in self.blocks:
-            x = block(x)                                    # (N, T+1, D)
+            x = block(x, context=context, context_mask=context_mask)                                    # (N, T+1, D)
         x = self.final_layer(x)                             # (N, T+1, out_channels)
-        return x[:, 2 + 512:, :]     # (N, T, C)
+        return x[:, 1:, :]     # (N, T, C)
 
-    def forward_with_cfg(self, x, t, z, cfg_scale):
+    def forward_with_cfg(self, x, t, z, cfg_scale, context, context_mask):
         """
         Forward pass of Diffusion, but also batches the unconditional forward pass for classifier-free guidance.
         """
@@ -258,7 +285,7 @@ class DiT(nn.Module):
         # https://github.com/openai/glide-text2im/blob/main/notebooks/text2im.ipynb
         half = x[: len(x) // 2]
         combined = torch.cat([half, half], dim=0).to(next(self.x_embedder.parameters()).dtype)
-        model_out = self.forward(combined, t, z)
+        model_out = self.forward(combined, t, z, context, context_mask)
         # eps, rest = model_out[:, :self.in_channels], model_out[:, self.in_channels:]
         eps, rest = model_out[:, :, :self.in_channels], model_out[:, :, self.in_channels:]
         cond_eps, uncond_eps = torch.split(eps, len(eps) // 2, dim=0)
