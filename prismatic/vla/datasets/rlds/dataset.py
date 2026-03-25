@@ -200,7 +200,6 @@ def make_dataset_from_rlds(
             "mm_task": mm_task,
             "action": tf.cast(traj["action"], tf.float32),
             "dataset_name": tf.repeat(name, traj_len),
-            "task_goal": traj["task_goal"],
         }
 
         if absolute_action_mask is not None:

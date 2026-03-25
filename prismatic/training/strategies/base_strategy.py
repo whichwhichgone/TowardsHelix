@@ -23,7 +23,7 @@ from prismatic.overwatch import initialize_overwatch
 from prismatic.training.metrics import Metrics, VLAMetrics
 from prismatic.util import check_bloat16_supported
 from prismatic.util.batching_utils import SplitModalitySampler
-from prismatic.util.data_utils import PaddedCollatorForActionPrediction, PaddedCollatorForLanguageModeling
+from prismatic.util.data_utils import PaddedCollator, PaddedCollatorForLanguageModeling
 from prismatic.vla.action_tokenizer import ActionTokenizer
 
 # Initialize Overwatch =>> Wraps `logging.Logger`
@@ -227,7 +227,7 @@ class TrainingStrategy(ABC):
                         # Check for Termination & Save Final Checkpoint (in case `max_steps` is not None)
                         if self.max_steps is not None and metrics.global_step >= self.max_steps:
                             self.save_checkpoint(metrics.run_dir, metrics.global_step, epoch, loss.item())
-                            dist.barrier()
+                            dist.barrier(device_ids=[torch.cuda.current_device()])
 
                             return
 
@@ -238,14 +238,14 @@ class TrainingStrategy(ABC):
             # Save checkpoint at end each epoch (if `self.max_steps` is None)
             if self.max_steps is None:
                 self.save_checkpoint(metrics.run_dir, metrics.global_step, epoch, loss.item())
-                dist.barrier()
+                dist.barrier(device_ids=[torch.cuda.current_device()])
 
     # === VLA Training ===
 
     def run_vla_training(
         self,
         vla_dataset: IterableDataset,
-        collator: PaddedCollatorForActionPrediction,
+        collator: PaddedCollator,
         action_tokenizer: ActionTokenizer,
         metrics: VLAMetrics,
         save_interval: int = 2500,
@@ -379,7 +379,7 @@ class TrainingStrategy(ABC):
                     self.save_checkpoint(
                         metrics.run_dir, metrics.global_step, epoch, loss.item(), only_trainable=not save_full_model
                     )
-                    dist.barrier()
+                    dist.barrier(device_ids=[torch.cuda.current_device()])
 
                     if terminate:
                         return

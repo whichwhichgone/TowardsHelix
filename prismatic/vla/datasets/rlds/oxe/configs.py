@@ -693,6 +693,18 @@ OXE_DATASET_CONFIGS = {
         "action_encoding": ActionEncoding.EEF_POS,
     },
 
+    "calvin_abc2d_oe_baseline": {
+        "image_obs_keys": {
+            "primary": "image",
+            "secondary": "wrist_image",
+            "wrist": "wrist_image",
+        },
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "state_obs_keys": ["state"],
+        "state_encoding": StateEncoding.JOINT_CALVIN,
+        "action_encoding": ActionEncoding.EEF_POS,
+    },
+
     # for ur5e_benchmark_v0 dataset
     "ur5e_benchmark_v0": {
         "image_obs_keys": {

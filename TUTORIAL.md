@@ -2,7 +2,7 @@
 
 ## 在使用自己的数据训练模型时，需要进行以下步骤
 
-> **Note**: 整个模型构造训练数据的入口函数为`train.py`文中的`get_vla_dataset_and_collator`。在该函数中首先定义了`RLDSBatchTransform`和`PaddedCollatorForActionPrediction`两个数据类分别用于对最后喂入模型的数据进行统一格式化的处理和对齐数据长度。然后，该函数中同时定义了一个`RLDSDataset`类的实例来管理训练模型用到的所有数据。RLDSDataset继承自`tf.data.Dataset`，因此可以直接使用`tf.data.Dataset`的API来对数据进行处理。
+> **Note**: 整个模型构造训练数据的入口函数为`train.py`中的`get_vla_dataset_and_collator`（用于Prismatic非端到端模型）和`get_vla_dataset_and_collator_e2e`（用于端到端模型，如Qwen-VL等）。对于端到端模型，`get_vla_dataset_and_collator_e2e`通过`e2e_vlm_name`参数来决定使用哪个`RLDSBatchTransform`（如`RLDSBatchTransformOeQwenVL3`）和`PaddedCollator`。在这些函数中首先定义了`RLDSBatchTransform`和`PaddedCollator`两个数据类分别用于对最后喂入模型的数据进行统一格式化的处理和对齐数据长度。然后，该函数中同时定义了一个`RLDSDataset`类的实例来管理训练模型用到的所有数据。RLDSDataset继承自`tf.data.Dataset`，因此可以直接使用`tf.data.Dataset`的API来对数据进行处理。
 
 **Step 1**: 为了能够支持自己的训练数据（假定自己的数据已经转为了rlds的标准形式），需要修改对应的`OXE_DATASET_CONFIGS`字典，该字典中包含了所有的OXE数据集，以及每个数据集在训练时对应的数据格式。具体参照`make_oxe_dataset_kwargs`函数中需要的数据集的具体属性来进行修改，比如需要从源数据集中提取哪些相机的数据，哪些传感器的数据，哪些语言指令等以支持本模型的训练。
 
@@ -34,4 +34,4 @@
 
 **Step 4**: 数据处理流程中，使用了`apply_trajectory_transforms`函数来在traj层级对训练数据进行处理，使用了`apply_frame_transforms`函数来在frame层级对训练数据进行处理。
 
-**Step 5**: `PaddedCollatorForActionPrediction`数据类用于最后组装参与训练的batch数据，对齐batch里不同数据的长度。 `RLDSBatchTransform()`则在每个batch数据喂入模型前进行最后格式化处理。
+**Step 5**: `PaddedCollator`数据类用于最后组装参与训练的batch数据，对齐batch里不同数据的长度。 `RLDSBatchTransform()`则在每个batch数据喂入模型前进行最后格式化处理。

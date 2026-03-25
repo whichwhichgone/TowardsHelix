@@ -7,16 +7,19 @@ format to OpenVLA, IterableDataset shim.
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Tuple, Type
+from typing import Any, Dict, Iterator, Tuple, Type
 import random
 import io
 import re
+import base64
+import json
 
 import numpy as np
 import torch
 from PIL import Image
 from torch.utils.data import Dataset, IterableDataset
 from transformers import PreTrainedTokenizerBase
+from transformers import AutoProcessor
 
 from prismatic.models.backbones.llm.prompting import PromptBuilder
 from prismatic.models.backbones.vision import ImageTransform
@@ -51,7 +54,7 @@ class RLDSBatchTransform:
         img_left = Image.fromarray(rlds_batch["observation"]["image_secondary"][0])
         img_right = Image.fromarray(rlds_batch["observation"]["image_wrist"][0])
         if debug := False:
-            img_debug_path = Path("/liujinxin/zhaowei/CogACT/imgs_debug")
+            img_debug_path = Path("imgs_debug")
             img_debug_path.mkdir(parents=True, exist_ok=True)
             img_scene.save(img_debug_path / "train_img_scene.png")
             img_left.save(img_debug_path / "train_img_left.png")
@@ -112,29 +115,36 @@ class RLDSBatchTransform:
 
         return dict(pixel_values=pixel_values, input_ids=input_ids, labels=labels, dataset_name=dataset_name, actions=action, action_masks=action_mask)
 
+
 @dataclass
 class RLDSBatchTransformOe(RLDSBatchTransform):
 
     def __post_init__(self):
-        special_tokens = {"additional_special_tokens": ["<oe>"] + [f"<vq_{i}>" for i in range(1024)] + ["<vq_end>"]}
+        special_tokens = {"additional_special_tokens": ["<oe>"]}
         num_added = self.base_tokenizer.add_special_tokens(special_tokens)
         if num_added > 0:
             print(f"Added {num_added} special tokens to the tokenizer.")
 
     def decode_utils(self, byte_utils):
         img_utils = []
-        if byte_utils.size != 0:
-            for idx, img_util in enumerate(byte_utils):
-                img_bytes = Image.open(io.BytesIO(img_util))
-                if img_bytes.mode != 'RGB':
-                    img_bytes = img_bytes.convert('RGB')
-                if debug := True:
-                    utils_debug_path = Path("/liujinxin/zhaowei/CogACT/imgs_debug")
-                    utils_debug_path.mkdir(parents=True, exist_ok=True)
-                    img_bytes.save(utils_debug_path / f"img_utils_{idx}.png")
 
-                img_utils.append(img_bytes)
-        else:
+        # byte_utils is a JSON string of base64-encoded PNG images
+        raw = byte_utils.decode()
+        if raw:
+            encoded_list = json.loads(raw)
+            for b64_str in encoded_list:
+                img_data = base64.b64decode(b64_str)
+                img = Image.open(io.BytesIO(img_data))
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                img = img.resize((224, 224))              # Resize to the default size for utils images
+                if debug := False:
+                    img_debug_path = Path("imgs_debug")
+                    img_debug_path.mkdir(parents=True, exist_ok=True)
+                    img.save(img_debug_path / f"train_util_{len(img_utils)}.png")
+                img_utils.append(img)
+
+        if not img_utils:
             # add a fake image placeholder for supporting fsdp
             random_array = np.random.randint(0, 256, (224, 224, 3), dtype=np.uint8)
             random_image = Image.fromarray(random_array)
@@ -143,29 +153,10 @@ class RLDSBatchTransformOe(RLDSBatchTransform):
 
     def get_oe_lang(self, rlds_batch):
         """Get the unified language instructions for oe-vla models."""
-        mm_type = rlds_batch["mm_task"]["task_type"].decode().lower()
         mm_instruction = rlds_batch["mm_task"]["mm_instruction"].decode().lower()
         mm_utils = rlds_batch["mm_task"]["mm_utils"]
         mm_utils = self.decode_utils(mm_utils)
-
-        def replace_all_placeholders(mm_instruction, replacement="<oe>"):
-            pattern = r"<[^>]+>"
-            return re.sub(pattern, replacement, mm_instruction)
-
-        if mm_type == "object" and len(mm_utils) != 0:
-            oe_lang = replace_all_placeholders(mm_instruction, replacement="<oe>")
-        elif mm_type == "ocr":
-            oe_lang = "follow the command in <oe>"
-        elif mm_type == "vgr":
-            oe_lang = "reach the goal state <oe>"
-        elif mm_type == "vdl":
-            oe_lang = "learn the video demo: <oe>,<oe>,<oe>,<oe>"
-        elif mm_type == "plain" or (mm_type == "object" and len(mm_utils) == 0):
-            oe_lang = rlds_batch["task"]["language_instruction"].decode().lower()
-        else:
-            raise ValueError(f"Not support mm_type {mm_type} in oe-vla models")
-
-        return oe_lang, mm_utils
+        return mm_instruction, mm_utils
 
     def __call__(self, rlds_batch: Dict[str, Any]) -> Dict[str, Any]:
         """Converts a RLDS batch to the format expected by the OpenVLA collator/models."""
@@ -181,7 +172,7 @@ class RLDSBatchTransformOe(RLDSBatchTransform):
         img_right = Image.fromarray(rlds_batch["observation"]["image_wrist"][0])
 
         if debug := False:
-            img_debug_path = Path("/liujinxin/zhaowei/CogACT/imgs_debug")
+            img_debug_path = Path("imgs_debug")
             img_debug_path.mkdir(parents=True, exist_ok=True)
             img_scene.save(img_debug_path / "train_img_scene.png")
             img_left.save(img_debug_path / "train_img_left.png")
@@ -210,11 +201,7 @@ class RLDSBatchTransformOe(RLDSBatchTransform):
             prompt_builder.add_turn(turn["from"], turn["value"])
 
         # Tokenize (w/ `base_tokenizer`)
-        goal_indices = rlds_batch["task_goal"].tolist()
-        goal_tokens = [f"<vq_{idx}>" for idx in goal_indices] + ["<vq_end>"]
         input_ids = self.base_tokenizer(prompt_builder.get_prompt(), add_special_tokens=True).input_ids
-        goal_suffix = self.base_tokenizer("".join(goal_tokens), add_special_tokens=False).input_ids
-        #input_ids = input_ids + goal_suffix
         labels = list(input_ids)
 
         # Tensorize =>> Run Image Transform to get `pixel_values` =>> Return
@@ -248,6 +235,101 @@ class RLDSBatchTransformOe(RLDSBatchTransform):
         state = rlds_batch["observation"]["proprio"]
         state = torch.tensor(state, dtype=torch.float32)
         return dict(pixel_values=pixel_values, pixel_utils=pixel_utils, input_ids=input_ids, labels=labels, dataset_name=dataset_name, actions=action, action_masks=action_mask, state=state)
+
+
+@dataclass
+class RLDSBatchTransformOeQwenVL3(RLDSBatchTransformOe):
+
+    def __post_init__(self):
+        # QwenVL3 consider all the images same, no need to add special token for utils
+        # This should not be removed even do nothing to rewrite the function
+        pass
+    
+    def oelang_to_qwen_input(self, obs_imgs, oe_lang, mm_utils, action):
+        # Replace <oe> tokens with actual image references in the content list
+        view_nums = len(obs_imgs)
+        oe_placeholders = "<oe>" * view_nums
+        oe_lang = f"Given the observation {oe_placeholders}; what action should the robot take to {oe_lang}?"
+        mm_utils = obs_imgs + mm_utils
+        content = []
+
+        parts = oe_lang.split("<oe>")
+        for i, token in enumerate(parts):
+            if token:
+                content.append({"type": "text", "text": token})
+            if i < len(parts) - 1:
+                content.append({"type": "image", "image": mm_utils[i]})
+
+        if self.action_tokenizer is None:
+            messages = [
+                {"role": "user", "content": content},
+                {"role": "assistant", "content": ""},
+            ]
+        else:
+            # Construct Chat-based Prompt =>> Input is default query + language instruction, output are the action tokens
+            messages = [
+                {"role": "user", "content": content},
+                {"role": "assistant", "content": self.action_tokenizer(action)},
+            ]
+
+        inputs = self.prompt_builder_fn(
+            messages,
+            tokenize=True,
+            add_generation_prompt=False,
+            return_dict=True,
+            return_tensors="pt"
+        )
+        return inputs
+
+
+    def __call__(self, rlds_batch):
+        # For future action predictions
+        if rlds_batch["action"].shape[0] > 1:
+            dataset_name, action = rlds_batch["dataset_name"], rlds_batch["action"]
+        else:
+            dataset_name, action = rlds_batch["dataset_name"], rlds_batch["action"][0]
+
+        img_scene = Image.fromarray(rlds_batch["observation"]["image_primary"][0])
+        img_left = Image.fromarray(rlds_batch["observation"]["image_secondary"][0])
+        img_right = Image.fromarray(rlds_batch["observation"]["image_wrist"][0])
+
+        if debug := False:
+            img_debug_path = Path("imgs_debug")
+            img_debug_path.mkdir(parents=True, exist_ok=True)
+            img_scene.save(img_debug_path / "train_img_scene.png")
+            img_left.save(img_debug_path / "train_img_left.png")
+            img_right.save(img_debug_path / "train_img_right.png")
+
+        oe_lang, mm_utils = self.get_oe_lang(rlds_batch)
+
+        # Tokenize using QwenVL3's processor
+        # For single arm setting (default use the right arm), the left image and right image are the same
+        obs_imgs = [img_scene, img_left]
+        qwen_input = self.oelang_to_qwen_input(obs_imgs, oe_lang, mm_utils, action)
+        input_ids = qwen_input["input_ids"]                                                 # shape: [1, seq_len]
+        labels = input_ids.detach().clone()                                                 # shape: [1, seq_len]
+        pixel_values = qwen_input["pixel_values"]
+        image_grid_thw = qwen_input["image_grid_thw"]
+
+        # Add future actions to batch
+        if rlds_batch["action"].shape[0] > 1:
+            action = torch.tensor(action, dtype=torch.float32)
+            action_mask = None
+            if "action_mask" in rlds_batch:
+                action_mask = torch.tensor(rlds_batch["action_mask"], dtype=torch.bool)
+
+        if self.action_tokenizer is None:
+            labels[0, :-1] = IGNORE_INDEX
+        else:
+            # [CRITICAL] We do not want to take the loss for anything but the predicted action tokens!
+            labels[0, : -(len(action) + 1)] = IGNORE_INDEX
+
+        if not self.predict_stop_token:
+            labels[0, -1] = IGNORE_INDEX
+
+        state = rlds_batch["observation"]["proprio"]
+        state = torch.tensor(state, dtype=torch.float32)
+        return dict(input_ids=input_ids, labels=labels, pixel_values=pixel_values, image_grid_thw=image_grid_thw, dataset_name=dataset_name, actions=action, action_masks=action_mask, state=state)
 
 
 class RLDSDataset(IterableDataset):
@@ -331,7 +413,7 @@ class RLDSDataset(IterableDataset):
     def make_dataset(self, rlds_config):
         return make_interleaved_dataset(**rlds_config)
 
-    def __iter__(self) -> Dict[str, Any]:
+    def __iter__(self) -> Iterator[Dict[str, Any]]:
         for rlds_batch in self.dataset.as_numpy_iterator():
             yield self.batch_transform(rlds_batch)
 
@@ -358,7 +440,7 @@ class EpisodicRLDSDataset(RLDSDataset):
             load_all_data_for_training=rlds_config["load_all_data_for_training"],
         )
 
-    def __iter__(self) -> Dict[str, Any]:
+    def __iter__(self) -> Iterator[Dict[str, Any]]:
         for rlds_batch in self.dataset.as_numpy_iterator():
             out = [
                 self.batch_transform(tree_map(lambda x: x[i], rlds_batch))  # noqa: B023

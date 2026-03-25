@@ -183,7 +183,7 @@ class FSDPStrategy(TrainingStrategy):
             apply_activation_checkpointing(self.vlm, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=check_fn)
 
         # Barrier =>> Sharding takes a minute?
-        dist.barrier()
+        dist.barrier(device_ids=[torch.cuda.current_device()])
 
         # Create Optimizer and LR Scheduler =>> note that most of the LR Schedulers we use require `max_steps/epochs`
         #   => Optimizer should only operate on parameters that are *unfrozen* / trainable!

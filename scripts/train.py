@@ -33,8 +33,9 @@ sys.path.insert(0, ".")
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 from prismatic.overwatch import initialize_overwatch
 from prismatic.util import set_global_seed
-from prismatic.vla import get_vla_dataset_and_collator
+from prismatic.vla import get_vla_dataset_and_collator, get_vla_dataset_and_collator_e2e
 from prismatic.vla.datasets.rlds.utils.data_utils import save_dataset_statistics
+from prismatic.models.vlms import EndToEndVLM
 
 from training import VLAMetrics, get_train_strategy
 from conf import VLAConfig, VLARegistry
@@ -152,7 +153,7 @@ def train(cfg: TrainConfig) -> None:
             yaml_cfg = yaml.safe_load(f_yaml)
             json.dump(yaml_cfg, f_json, indent=2)
     
-    dist.barrier()
+    dist.barrier(device_ids=[torch.cuda.current_device()])
     # Load VLA checkpoint (if resuming from training) or Base VLM otherwise (from `cfg.vla.base_vlm` ID or Path)
     #   =>> Note :: Verifies that all parameters are loaded in FP32 on load!
     overwatch.info(f"Loading Base VLM `{cfg.vla.base_vlm}` from ID/Path")
@@ -180,13 +181,19 @@ def train(cfg: TrainConfig) -> None:
         overwatch.info("Creating VLA from Base VLM")
         if cfg.use_ema:
             overwatch.info("Creating EMA for Diffusion")
-        vla = CogACT(vlm, 
-                            action_model_type=cfg.action_model_type,
-                            action_dim=cfg.action_dim,
-                            future_action_window_size=cfg.future_action_window_size,
-                            past_action_window_size=cfg.past_action_window_size,
-                            use_ema=cfg.use_ema,
-                            )
+        
+        # Check if this is an end-to-end VLM
+        is_e2e_vlm = isinstance(vlm, EndToEndVLM)
+        vla = CogACT(
+            vlm, 
+            action_model_type=cfg.action_model_type,
+            token_size=vlm.vlm_backbone.embed_dim if is_e2e_vlm else vlm.llm_backbone.llm.lm_head.in_features,
+            action_dim=cfg.action_dim,
+            future_action_window_size=cfg.future_action_window_size,
+            past_action_window_size=cfg.past_action_window_size,
+            use_ema=cfg.use_ema,
+            e2e_vlm=is_e2e_vlm,
+        )
         # del this variable to avoid bugs. The vlm shouldn't be used anymore
         del vlm
 
@@ -225,25 +232,51 @@ def train(cfg: TrainConfig) -> None:
     )
 
     overwatch.info(f"Creating VLA Open-X Dataset with Mixture `{cfg.vla.data_mix}`")
-    vla_dataset, _, collator = get_vla_dataset_and_collator(
-        cfg.data_root_dir,
-        cfg.vla.data_mix,
-        image_transform=vla.vision_backbone.get_image_transform(),
-        tokenizer=vla.llm_backbone.get_tokenizer(),
-        prompt_builder_fn=vla.llm_backbone.prompt_builder_fn,
-        default_image_resolution=vla.vision_backbone.default_image_resolution,
-        shuffle_buffer_size=cfg.vla.shuffle_buffer_size,
-        image_aug=cfg.image_aug,
-        load_all_data_for_training=cfg.load_all_data_for_training,
-        future_action_window_size=cfg.future_action_window_size,
-        past_action_window_size=cfg.past_action_window_size,
-    )
+    
+    # Get image transform, resolution, and build dataset based on VLM type
+    if vla.e2e_vlm:
+        image_transform = vla.vlm.vlm_backbone.get_image_transform()
+        default_image_resolution = vla.vlm.vlm_backbone.default_image_resolution
+        tokenizer = vla.vlm.vlm_backbone.get_tokenizer()
+        prompt_builder_fn = vla.vlm.vlm_backbone.prompt_builder_fn
+        vla_dataset, _, collator = get_vla_dataset_and_collator_e2e(
+            cfg.data_root_dir,
+            cfg.vla.data_mix,
+            image_transform=image_transform,
+            tokenizer=tokenizer,
+            prompt_builder_fn=prompt_builder_fn,
+            default_image_resolution=default_image_resolution,
+            e2e_vlm_name=vla.vlm.model_id,
+            shuffle_buffer_size=cfg.vla.shuffle_buffer_size,
+            image_aug=cfg.image_aug,
+            load_all_data_for_training=cfg.load_all_data_for_training,
+            future_action_window_size=cfg.future_action_window_size,
+            past_action_window_size=cfg.past_action_window_size,
+        )
+    else:
+        image_transform = vla.vision_backbone.get_image_transform()
+        default_image_resolution = vla.vision_backbone.default_image_resolution
+        tokenizer = vla.llm_backbone.get_tokenizer()
+        prompt_builder_fn = vla.llm_backbone.prompt_builder_fn
+        vla_dataset, _, collator = get_vla_dataset_and_collator(
+            cfg.data_root_dir,
+            cfg.vla.data_mix,
+            image_transform=image_transform,
+            tokenizer=tokenizer,
+            prompt_builder_fn=prompt_builder_fn,
+            default_image_resolution=default_image_resolution,
+            shuffle_buffer_size=cfg.vla.shuffle_buffer_size,
+            image_aug=cfg.image_aug,
+            load_all_data_for_training=cfg.load_all_data_for_training,
+            future_action_window_size=cfg.future_action_window_size,
+            past_action_window_size=cfg.past_action_window_size,
+        )
 
     # Save dataset statistics for de-normalization at inference time
     if overwatch.is_rank_zero():
         save_dataset_statistics(vla_dataset.dataset_statistics, run_dir)
     
-    dist.barrier()
+    dist.barrier(device_ids=[torch.cuda.current_device()])
     # Create Train Strategy
     overwatch.info(f"Initializing Train Strategy `{cfg.train_strategy}`")
     train_strategy = get_train_strategy(
@@ -298,7 +331,7 @@ def train(cfg: TrainConfig) -> None:
 
     # And... we're done!
     overwatch.info("... and that's all, folks!")
-    dist.barrier()
+    dist.barrier(device_ids=[torch.cuda.current_device()])
     dist.destroy_process_group()
 
 

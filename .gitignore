@@ -155,3 +155,6 @@ logs/
 imgs_debug/
 vla/calvin_res/utils
 vla/piper_res/utils
+
+test_imgs/
+test.py

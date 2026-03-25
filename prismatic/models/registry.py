@@ -683,6 +683,36 @@ MODEL_REGISTRY = {
             "train_epochs": 1,
         }
     },
+
+    # === End-to-End VLM Models ===
+    "qwen3-vl-4b-instruct": {
+        "model_id": "qwen3-vl-4b-instruct",
+        "names": ["Qwen3-VL 4B Instruct", "Qwen3-VL-4B"],
+        "is_end_to_end_vlm": True,
+        "description": {
+            "name": "Qwen3-VL 4B Instruct",
+            "optimization_procedure": "end-to-end",
+            "visual_representation": "Integrated Vision Encoder",
+            "image_processing": "Native",
+            "language_model": "Qwen3 4B",
+            "datasets": [],
+            "train_epochs": 0,
+        }
+    },
+    "qwen3-vl-8b-instruct": {
+        "model_id": "qwen3-vl-8b-instruct",
+        "names": ["Qwen3-VL 8B Instruct", "Qwen3-VL-8B"],
+        "is_end_to_end_vlm": True,
+        "description": {
+            "name": "Qwen3-VL 8B Instruct",
+            "optimization_procedure": "end-to-end",
+            "visual_representation": "Integrated Vision Encoder",
+            "image_processing": "Native",
+            "language_model": "Qwen3 8B",
+            "datasets": [],
+            "train_epochs": 0,
+        }
+    },
 }
 
 # Build Global Registry (Model ID, Name) -> Metadata

@@ -137,7 +137,7 @@ class FSDPStrategy(TrainingStrategy):
 
                 # Save Checkpoint & Copy Latest to `latest-checkpoint.pt`
                 torch.save({"model": model_state_dicts}, checkpoint_path)
-            dist.barrier()
+            dist.barrier(device_ids=[torch.cuda.current_device()])
             optim_state_dict = FSDP.optim_state_dict(self.vlm, self.optimizer)
             if overwatch.is_rank_zero():
                 optimizer_path = self._get_optimizer_path(checkpoint_path)
@@ -184,12 +184,6 @@ class FSDPStrategy(TrainingStrategy):
             fsdp_precision_policy = MixedPrecision(
                 param_dtype=torch.bfloat16, reduce_dtype=reduce_buffer_dtype, buffer_dtype=reduce_buffer_dtype
             )
-
-            # When running FSDP with a frozen vision backbone --> move to half precision!
-            if self.stage not in {"full-finetune", "vla-full-train", "vla-sandwich-train"}:
-                overwatch.info("Casting Vision Backbone to *Half Precision* via `.to(dtype=...)`")
-                self.vlm.vision_backbone.to(dtype=self.vlm.vision_backbone.half_precision_dtype)
-
         else:
             # If we're not using mixed precision, everything is in default full precision!
             fsdp_precision_policy = MixedPrecision(
@@ -222,7 +216,7 @@ class FSDPStrategy(TrainingStrategy):
             apply_activation_checkpointing(self.vlm, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=check_fn)
 
         # Barrier =>> Sharding takes a minute?
-        dist.barrier()
+        dist.barrier(device_ids=[torch.cuda.current_device()])
 
         # Create Optimizer and LR Scheduler =>> note that most of the LR Schedulers we use require `max_steps/epochs`
         #   => Optimizer should only operate on parameters that are *unfrozen* / trainable!

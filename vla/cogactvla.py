@@ -13,7 +13,7 @@ from copy import deepcopy
 import torch
 import torch.nn as nn
 import numpy as np
-from PIL import Image
+from PIL.Image import Image
 from torch.distributed.fsdp.wrap import _module_wrap_policy, _or_policy
 from torch.nn.utils.rnn import pad_sequence
 from transformers.modeling_outputs import CausalLMOutputWithPast
@@ -52,17 +52,22 @@ class CogACT(nn.Module):
         past_action_window_size: int = 0,
         use_ema: bool = False,
         norm_stats: Dict[str, Dict[str, Dict[str, Dict[str, List[float]]]]] = None,
+        e2e_vlm: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
         
-        self.action_model = ActionModel(model_type = action_model_type, 
-                                            token_size = token_size, 
-                                            in_channels = action_dim, 
-                                            future_action_window_size = future_action_window_size, 
-                                            past_action_window_size = past_action_window_size)
-        self.state_proj = nn.Linear(7, token_size, bias=False)
-        self.hidden_proj = nn.Linear(vlm.llm_backbone.embed_dim, 768, bias=False)
+        self.e2e_vlm = e2e_vlm
+        self.action_model = ActionModel(
+            model_type = action_model_type, 
+            token_size = token_size, 
+            in_channels = action_dim, 
+            future_action_window_size = future_action_window_size, 
+            past_action_window_size = past_action_window_size
+            )
+        self.state_proj = nn.Linear(15, token_size, bias=False)
+        hidden_size = vlm.vlm_backbone.embed_dim if e2e_vlm else vlm.llm_backbone.embed_dim
+        self.hidden_proj = nn.Linear(hidden_size, 768, bias=False)                       # 768 is the hidden size of DiT-B
         self.vlm = vlm
         self.future_action_window_size = future_action_window_size
         self.past_action_window_size = past_action_window_size
@@ -94,10 +99,39 @@ class CogACT(nn.Module):
     
     @property
     def vision_backbone(self) -> VisionBackbone:
+        if self.e2e_vlm:
+            return None  # End-to-end VLMs don't have separate vision backbone
         return self.vlm.vision_backbone
     
     def freeze_backbones(self, stage):
         self.vlm.freeze_backbones(stage)
+
+    def _build_vlm_kwargs(
+        self,
+        input_ids, attention_mask, pixel_values, pixel_utils, labels,
+        inputs_embeds, past_key_values, use_cache, output_attentions,
+        output_hidden_states, return_dict, image_grid_thw,
+    ) -> dict:
+        # form the base kwargs that are common to both e2e and non-e2e VLMs
+        base = dict(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            pixel_values=pixel_values,
+            labels=labels,
+            inputs_embeds=inputs_embeds,
+            past_key_values=past_key_values,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        if self.e2e_vlm:
+            if "qwen" in self.vlm.model_id.lower():
+                base["image_grid_thw"] = image_grid_thw
+        else:
+            base["pixel_utils"] = pixel_utils
+        return base
 
     def forward(
         self,
@@ -116,84 +150,72 @@ class CogACT(nn.Module):
         repeated_diffusion_steps: int = 4,
         action_masks = None,
         state = None,
+        image_grid_thw: Optional[torch.LongTensor] = None,
     ) -> Tuple:
         """Run a forward pass through the VLM, returning a CausalLMOutputWithPast instance (contains loss)."""
         
-        output: CausalLMOutputWithPast = self.vlm(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            pixel_values=pixel_values,
-            pixel_utils=pixel_utils,
-            labels=labels,
-            inputs_embeds=inputs_embeds,
-            past_key_values=past_key_values,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
+        # assemble VLM kwargs based on VLM type; all forward inputs to be passed to self.vlm() must go through here.
+        vlm_kwargs = self._build_vlm_kwargs(
+            input_ids, attention_mask, pixel_values, pixel_utils, labels,
+            inputs_embeds, past_key_values, use_cache, output_attentions,
+            output_hidden_states, return_dict, image_grid_thw,
         )
+        output: CausalLMOutputWithPast = self.vlm(**vlm_kwargs)
 
-        # extract the last hidden state and the learnable EOS token feature
+        # extract the last hidden state and its corresponding attention masks
         last_hidden = output.hidden_states[-1]
-        attention_mask = output["oe_attention_mask"]
         fused_attention_mask = ~output["fused_attention_mask"]
 
-        # extract the visual token number
-        if self.vlm.vision_backbone.featurizer is not None:
-            num_patch = self.vlm.vision_backbone.featurizer.patch_embed.num_patches
-        elif hasattr(self.vlm.vision_backbone, 'siglip_featurizer') and self.vlm.vision_backbone.siglip_featurizer is not None:
-            num_patch = self.vlm.vision_backbone.siglip_featurizer.patch_embed.num_patches
-        else:
-            raise ValueError("No vision backbone found")
-        
-        # since using three input images, the num_patch should be 3 times the original
-        last_lang_hidden = torch.cat([last_hidden[:, :1], last_hidden[:, num_patch * 2 + 1:]], dim=1)
-
         # extract the cognition feature
-        cumulative_sum = attention_mask.cumsum(dim=1)
-        last_true_indices = (cumulative_sum == cumulative_sum.max(dim=1, keepdim=True)[0]).float().argmax(dim=1)  
-        expanded_indices = last_true_indices.unsqueeze(-1).expand(-1, last_lang_hidden.size(-1))  
-        cognition_features = last_lang_hidden.gather(1, expanded_indices.unsqueeze(1))                       # [B, 1, D]
-        state_features = self.state_proj(state)                                                              # [B, 1, D]
+        state_features = self.state_proj(state)                                                 # [B, 1, D]
         hidden_features = self.hidden_proj(last_hidden)                                                     
-        cognition_features = torch.cat([state_features], dim=1)                                              # [B, 512 + 2, D]
 
-        actions_history = actions[:,0:self.past_action_window_size,:]
         actions_future = actions[:, -(self.future_action_window_size+1):, :]
         
         # Repeat 'actions' 'repeated_diffusion_steps' times, resulting in [repeated_diffusion_steps*B, T, D]
         actions_repeated = actions_future.repeat(repeated_diffusion_steps, 1, 1)
-        actions_history_repeated = actions_history.repeat(repeated_diffusion_steps, 1, 1)
-        cognition_features_repeated = cognition_features.repeat(repeated_diffusion_steps, 1, 1) # [repeated_diffusion_steps*B, 1, D]
+        state_features_repeated = state_features.repeat(repeated_diffusion_steps, 1, 1) # [repeated_diffusion_steps*B, 1, D]
         hidden_features_repeated = hidden_features.repeat(repeated_diffusion_steps, 1, 1)
         hidden_mask_repeated = fused_attention_mask.repeat(repeated_diffusion_steps, 1)
 
         # Action model forward and compute loss
-        loss = self.action_model.loss(actions_repeated, cognition_features_repeated, context=hidden_features_repeated, context_mask=hidden_mask_repeated)
+        loss = self.action_model.loss(actions_repeated, state_features_repeated, context=hidden_features_repeated, context_mask=hidden_mask_repeated)
         return loss, output
 
     def get_fsdp_wrapping_policy(self) -> Callable:
         """Return an FSDP _or_policy over the policies returned by each individual backbone (and our VLM policy)."""
-        vision_fsdp_wrapping_policy = self.vlm.vision_backbone.get_fsdp_wrapping_policy()
-        llm_fsdp_wrapping_policy = self.vlm.llm_backbone.get_fsdp_wrapping_policy()
+        if self.e2e_vlm:
+            # For end-to-end VLMs, use the VLM's own wrapping policy
+            vlm_fsdp_wrapping_policy = self.vlm.get_fsdp_wrapping_policy()
+            prismatic_fsdp_wrapping_policy = partial(
+                _module_wrap_policy,
+                module_classes={LinearProjector, MLPProjector, FusedMLPProjector, DiT},
+            )
+            return partial(
+                _or_policy,
+                policies=[vlm_fsdp_wrapping_policy, prismatic_fsdp_wrapping_policy],
+            )
+        else:
+            vision_fsdp_wrapping_policy = self.vlm.vision_backbone.get_fsdp_wrapping_policy()
+            llm_fsdp_wrapping_policy = self.vlm.llm_backbone.get_fsdp_wrapping_policy()
 
-        # Get Prismatic Wrapping Policy =>> just a module wrapping policy around `self.projector` and DiT
-        prismatic_fsdp_wrapping_policy = partial(
-            _module_wrap_policy,
-            module_classes={LinearProjector, MLPProjector, FusedMLPProjector, DiT},
-        )
+            # Get Prismatic Wrapping Policy =>> just a module wrapping policy around `self.projector` and DiT
+            prismatic_fsdp_wrapping_policy = partial(
+                _module_wrap_policy,
+                module_classes={LinearProjector, MLPProjector, FusedMLPProjector, DiT},
+            )
 
-        # Return union (_or_) over constituent policies
-        #   => Note: there is *not* a fall-through policy; any module that isn't covered by the above constituents will
-        #            automatically be folded into the root VLM FSDP instance.
-        return partial(
-            _or_policy,
-            policies=[
-                vision_fsdp_wrapping_policy,
-                llm_fsdp_wrapping_policy,
-                prismatic_fsdp_wrapping_policy,
-            ],
-        )
+            # Return union (_or_) over constituent policies
+            #   => Note: there is *not* a fall-through policy; any module that isn't covered by the above constituents will
+            #            automatically be folded into the root VLM FSDP instance.
+            return partial(
+                _or_policy,
+                policies=[
+                    vision_fsdp_wrapping_policy,
+                    llm_fsdp_wrapping_policy,
+                    prismatic_fsdp_wrapping_policy,
+                ],
+            )
 
     def load_ema_to_weights(self):
         """Load the EMA state dict to the weights."""
@@ -292,6 +314,104 @@ class CogACT(nn.Module):
                 cogact.ema_diffusion.load_state_dict(model_state_dict["action_model"])
         else:
             overwatch.warning("No ActionModel found in the pretrained checkpoint. Initializing a new one.")
+        return cogact
+
+    @classmethod
+    def from_pretrained_end_to_end(
+        cls,
+        pretrained_checkpoint: Path,
+        model_id: str,
+        vlm_backbone,  # VLMBackbone instance (e.g., Qwen3VLBackbone)
+        enable_mixed_precision_training: bool = True,
+        arch_specifier: str = "end-to-end",
+        freeze_weights: bool = True,
+        action_dim: int = 7,
+        future_action_window_size: int = 15,
+        past_action_window_size: int = 0,
+        action_model_type: str = 'DiT-B',
+        use_ema: bool = False,
+        norm_stats = None,
+        **kwargs,
+    ) -> "CogACT":
+        """
+        Load CogACT from pretrained checkpoint using an end-to-end VLM backbone.
+        
+        This method handles VLM models like Qwen3-VL that have integrated
+        vision and language components.
+        """
+        from prismatic.models.vlms import EndToEndVLM
+        
+        # Create EndToEndVLM wrapper
+        vlm = EndToEndVLM(
+            model_id,
+            vlm_backbone,
+            enable_mixed_precision_training=enable_mixed_precision_training,
+            arch_specifier=arch_specifier,
+            **kwargs,
+        )
+
+        # Load from Checkpoint if exists
+        if pretrained_checkpoint is not None and pretrained_checkpoint.exists():
+            model_state_dict = torch.load(pretrained_checkpoint, map_location="cpu")["model"]
+            
+            # Load VLM backbone weights
+            if "vlm_backbone" in model_state_dict:
+                vlm.vlm_backbone.load_state_dict(model_state_dict["vlm_backbone"])
+                overwatch.info("Loaded vlm_backbone weights from checkpoint.")
+
+        # Freeze Weights
+        if freeze_weights:
+            vlm.requires_grad_(False)
+            vlm.eval()
+
+        # Get token size from VLM backbone
+        token_size = vlm_backbone.embed_dim
+
+        # Initialize CogACT
+        cogact = cls(
+            vlm,
+            action_model_type=action_model_type,
+            token_size=token_size,
+            action_dim=action_dim,
+            future_action_window_size=future_action_window_size,
+            past_action_window_size=past_action_window_size,
+            use_ema=use_ema,
+            norm_stats=norm_stats,
+            e2e_vlm=True,
+        )
+
+        # Load action model and projector weights from checkpoint
+        if pretrained_checkpoint is not None and pretrained_checkpoint.exists():
+            model_state_dict = torch.load(pretrained_checkpoint, map_location="cpu")["model"]
+            
+            if "state_proj" in model_state_dict:
+                try:
+                    cogact.state_proj.load_state_dict(model_state_dict["state_proj"])
+                    overwatch.info("Successfully loaded state_proj weights from the pretrained checkpoint.")
+                except Exception as e:
+                    overwatch.warning(f"Failed to load state_proj weights: {e}. Initializing with random weights.")
+            
+            if "hidden_proj" in model_state_dict:
+                try:
+                    cogact.hidden_proj.load_state_dict(model_state_dict["hidden_proj"])
+                    overwatch.info("Successfully loaded hidden_proj weights from the pretrained checkpoint.")
+                except Exception as e:
+                    overwatch.warning(f"Failed to load hidden_proj weights: {e}. Initializing with random weights.")
+
+            if "action_model" in model_state_dict:
+                try:
+                    cogact.action_model.load_state_dict(model_state_dict["action_model"])
+                    overwatch.info("Successfully loaded ActionModel weights from the pretrained checkpoint.")
+                except Exception as e:
+                    overwatch.warning(f"Failed to load ActionModel weights: {e}. Initializing with random weights.")
+
+                if "ema_diffusion" in model_state_dict and use_ema:
+                    cogact.ema_diffusion.load_state_dict(model_state_dict["ema_diffusion"])
+                elif use_ema:
+                    cogact.ema_diffusion.load_state_dict(model_state_dict["action_model"])
+            else:
+                overwatch.warning("No ActionModel found in the pretrained checkpoint. Initializing a new one.")
+
         return cogact        
 
     @torch.inference_mode()
@@ -320,7 +440,7 @@ class CogACT(nn.Module):
         @return Unnormalized (continuous) action vector --> end-effector deltas.
         """
         image_transform, tokenizer = self.vlm.vision_backbone.image_transform, self.vlm.llm_backbone.tokenizer
-        special_tokens = {"additional_special_tokens": ["<oe>"] + [f"<vq_{i}>" for i in range(1024)] + ["<vq_end>"]}
+        special_tokens = {"additional_special_tokens": ["<oe>"]}
         tokenizer.add_special_tokens(special_tokens)
 
         # Build VLA Prompt

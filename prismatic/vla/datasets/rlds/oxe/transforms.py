@@ -910,6 +910,7 @@ OXE_STANDARDIZATION_TRANSFORMS = {
     "ur5e_benchmark_v0": identity_transform,
     "example_dataset": identity_transform,
     "calvin_abc2d_oe": identity_transform,
+    "calvin_abc2d_oe_baseline": identity_transform,
     "piper_oe": identity_transform,
     "piper_arrange": identity_transform,
     "piper_oe_nolang": identity_transform,

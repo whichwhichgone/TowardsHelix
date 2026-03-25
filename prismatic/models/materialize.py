@@ -1,11 +1,11 @@
 """
 materialize.py
 
-Factory class for initializing Vision Backbones, LLM Backbones, and VLMs from a set registry; provides and exports
-individual functions for clear control flow.
+Factory class for initializing Vision Backbones, LLM Backbones, VLM Backbones, and VLMs from a set registry;
+provides and exports individual functions for clear control flow.
 """
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 from transformers import PreTrainedTokenizerBase
 
@@ -20,6 +20,7 @@ from prismatic.models.backbones.vision import (
     SigLIPViTBackbone,
     VisionBackbone,
 )
+from prismatic.models.backbones.vlm import VLMBackbone, Qwen3VLBackbone
 from prismatic.models.vlms import PrismaticVLM
 
 # === Registries =>> Maps ID --> {cls(), kwargs} :: Different Registries for Vision Backbones, LLM Backbones, VLMs ===
@@ -70,6 +71,21 @@ LLM_BACKBONES = {
 
     # === Phi-2 Backbone ===
     "phi-2-3b": {"cls": PhiLLMBackbone, "kwargs": {}},
+}
+
+
+# === End-to-End VLM Backbone Registry ===
+# For models like Qwen3-VL, InternVL that have integrated vision and language components
+VLM_BACKBONES = {
+    # === Qwen3-VL Models ===
+    "qwen3-vl-4b-instruct": {
+        "cls": Qwen3VLBackbone,
+        "kwargs": {"local_path": "models/Qwen3-VL-4B-Instruct"},
+    },
+    "qwen3-vl-8b-instruct": {
+        "cls": Qwen3VLBackbone,
+        "kwargs": {"local_path": "models/Qwen3-VL-8B-Instruct"},
+    },
 }
 
 # fmt: on
@@ -128,3 +144,41 @@ def get_vlm(
         enable_mixed_precision_training=enable_mixed_precision_training,
         arch_specifier=arch_specifier,
     )
+
+
+def get_vlm_backbone_and_tokenizer(
+    vlm_backbone_id: str,
+    vlm_max_length: int = 2048,
+    hf_token: Optional[str] = None,
+    inference_mode: bool = False,
+) -> Tuple[VLMBackbone, PreTrainedTokenizerBase]:
+    """
+    Instantiate an end-to-end VLM Backbone (e.g., Qwen3-VL, InternVL).
+    
+    Args:
+        vlm_backbone_id: ID of the VLM backbone to load
+        vlm_max_length: Maximum sequence length
+        hf_token: HuggingFace token for gated models
+        inference_mode: If True, load for inference (skip weight loading)
+        
+    Returns:
+        Tuple of (VLMBackbone, tokenizer)
+    """
+    if vlm_backbone_id in VLM_BACKBONES:
+        vlm_cfg = VLM_BACKBONES[vlm_backbone_id]
+        vlm_backbone: VLMBackbone = vlm_cfg["cls"](
+            vlm_backbone_id,
+            vlm_max_length=vlm_max_length,
+            hf_token=hf_token,
+            inference_mode=inference_mode,
+            **vlm_cfg["kwargs"],
+        )
+        tokenizer = vlm_backbone.get_tokenizer()
+        return vlm_backbone, tokenizer
+    else:
+        raise ValueError(f"VLM Backbone `{vlm_backbone_id}` is not supported!")
+
+
+def is_vlm_backbone(backbone_id: str) -> bool:
+    """Check if a backbone ID refers to an end-to-end VLM backbone."""
+    return backbone_id in VLM_BACKBONES

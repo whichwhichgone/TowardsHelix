@@ -10,12 +10,18 @@ import os
 from pathlib import Path
 from typing import List, Optional, Union
 
+import torch
 from huggingface_hub import HfFileSystem, hf_hub_download
 
 from prismatic.conf import ModelConfig
-from prismatic.models.materialize import get_llm_backbone_and_tokenizer, get_vision_backbone_and_transform
+from prismatic.models.materialize import (
+    get_llm_backbone_and_tokenizer,
+    get_vision_backbone_and_transform,
+    get_vlm_backbone_and_tokenizer,
+    is_vlm_backbone,
+)
 from prismatic.models.registry import GLOBAL_REGISTRY, MODEL_REGISTRY
-from prismatic.models.vlms import PrismaticVLM
+from prismatic.models.vlms import PrismaticVLM, EndToEndVLM
 from prismatic.overwatch import initialize_overwatch
 
 from vla import CogACT
@@ -52,8 +58,55 @@ def load(
     hf_token: Optional[str] = None,
     cache_dir: Optional[Union[str, Path]] = None,
     load_for_training: bool = False,
+) -> Union[PrismaticVLM, EndToEndVLM]:
+    """Loads a pretrained VLM from either local disk or the HuggingFace Hub.
+    
+    Supports both Prismatic VLMs (separate vision + LLM backbones) and 
+    End-to-End VLMs (integrated vision-language models like Qwen3-VL).
+    """
+    # Check if this is an end-to-end VLM by model ID
+    is_end_to_end = _is_end_to_end_vlm(model_id_or_path)
+    
+    if is_end_to_end:
+        return _load_end_to_end_vlm(model_id_or_path, hf_token, cache_dir, load_for_training)
+    else:
+        return _load_prismatic_vlm(model_id_or_path, hf_token, cache_dir, load_for_training)
+
+
+def _is_end_to_end_vlm(model_id_or_path: Union[str, Path]) -> bool:
+    """Check if a model is an end-to-end VLM via GLOBAL_REGISTRY."""
+    model_id_or_path = str(model_id_or_path)
+
+    # For local paths, extract model_id from config.json
+    if os.path.isdir(model_id_or_path):
+        config_json = Path(model_id_or_path) / "config.json"
+        if config_json.exists():
+            with open(config_json, "r") as f:
+                model_id_or_path = json.load(f).get("model", {}).get("model_id", model_id_or_path)
+        else:
+            raise ValueError(f"Missing `config.json` for `{model_id_or_path = }`; cannot determine if end-to-end VLM.")
+
+    # Check in GLOBAL_REGISTRY
+    if model_id_or_path in GLOBAL_REGISTRY:
+        return GLOBAL_REGISTRY[model_id_or_path].get("is_end_to_end_vlm", False)
+
+    # Fallback: check via ModelConfig registry
+    try:
+        model_cfg = ModelConfig.get_choice_class(model_id_or_path)()
+        return getattr(model_cfg, "is_end_to_end_vlm", False)
+    except (KeyError, ValueError):
+        overwatch.debug(f"Model `{model_id_or_path}` not found in ModelConfig registry; treating as Prismatic VLM.")
+
+    return False
+
+
+def _load_prismatic_vlm(
+    model_id_or_path: Union[str, Path],
+    hf_token: Optional[str] = None,
+    cache_dir: Optional[Union[str, Path]] = None,
+    load_for_training: bool = False,
 ) -> PrismaticVLM:
-    """Loads a pretrained PrismaticVLM from either local disk or the HuggingFace Hub."""
+    """Loads a pretrained PrismaticVLM (separate vision + LLM backbones)."""
     if os.path.isdir(model_id_or_path):
         overwatch.info(f"Loading from local path `{(run_dir := Path(model_id_or_path))}`")
 
@@ -116,6 +169,82 @@ def load(
 
     return vlm
 
+
+def _load_end_to_end_vlm(
+    model_id_or_path: Union[str, Path],
+    hf_token: Optional[str] = None,
+    cache_dir: Optional[Union[str, Path]] = None,
+    load_for_training: bool = False,
+) -> EndToEndVLM:
+    """Loads an end-to-end VLM (e.g., Qwen3-VL) that has integrated vision-language processing."""
+    model_id_or_path = str(model_id_or_path)
+    checkpoint_pt = None
+    
+    # Try to get model config
+    if os.path.isdir(model_id_or_path):
+        overwatch.info(f"Loading end-to-end VLM from local path `{(run_dir := Path(model_id_or_path))}`")
+        config_json = run_dir / "config.json"
+        checkpoint_pt_path = run_dir / "checkpoints" / "latest-checkpoint.pt"
+        if checkpoint_pt_path.exists():
+            checkpoint_pt = checkpoint_pt_path
+        
+        if config_json.exists():
+            with open(config_json, "r") as f:
+                cfg = json.load(f)
+                if "model" in cfg:
+                    model_cfg = ModelConfig.get_choice_class(cfg["model"]["model_id"])()
+                else:
+                    raise ValueError(f"Invalid config format in `{config_json}`; missing 'model' key.")
+        else:
+            raise ValueError(f"Missing `config.json` for `{run_dir = }`")
+    else:
+        # Load by model ID from registry
+        if model_id_or_path in GLOBAL_REGISTRY:
+            model_id = GLOBAL_REGISTRY[model_id_or_path]['model_id']
+            model_cfg = ModelConfig.get_choice_class(model_id)()
+        else:
+            # Try direct model config lookup
+            model_cfg = ModelConfig.get_choice_class(model_id_or_path)()
+    
+    overwatch.info(
+        f"Found Config =>> Loading End-to-End VLM [bold blue]{model_cfg.model_id}[/] with:\n"
+        f"             VLM Backbone    =>> [bold]{model_cfg.vlm_backbone_id}[/]\n"
+        f"             Arch Specifier  =>> [bold]{model_cfg.arch_specifier}[/]"
+    )
+    
+    # Load VLM Backbone
+    overwatch.info(f"Loading VLM Backbone [bold]{model_cfg.vlm_backbone_id}[/]")
+    vlm_backbone, tokenizer = get_vlm_backbone_and_tokenizer(
+        model_cfg.vlm_backbone_id,
+        vlm_max_length=model_cfg.llm_max_length,
+        hf_token=hf_token,
+        inference_mode=not load_for_training,
+    )
+    
+    # Create EndToEndVLM
+    overwatch.info(f"Creating EndToEndVLM [bold blue]{model_cfg.model_id}[/]")
+    vlm = EndToEndVLM(
+        model_cfg.model_id,
+        vlm_backbone,
+        enable_mixed_precision_training=model_cfg.enable_mixed_precision_training,
+        arch_specifier=model_cfg.arch_specifier,
+    )
+    
+    # Load from checkpoint if exists
+    if checkpoint_pt is not None and checkpoint_pt.exists():
+        overwatch.info(f"Loading from checkpoint [underline]`{checkpoint_pt}`[/]")
+        model_state_dict = torch.load(checkpoint_pt, map_location="cpu")["model"]
+        if "vlm_backbone" in model_state_dict:
+            vlm.vlm_backbone.load_state_dict(model_state_dict["vlm_backbone"])
+    
+    # Freeze weights if not training
+    if not load_for_training:
+        vlm.requires_grad_(False)
+        vlm.eval()
+    
+    return vlm
+
+
 # === Load Pretrained VLA Model ===
 def load_vla(
     model_id_or_path: Union[str, Path],
@@ -177,8 +306,31 @@ def load_vla(
     with open(dataset_statistics_json, "r") as f:
         norm_stats = json.load(f)
 
-    # = Load Individual Components necessary for Instantiating a VLA (via base VLM components) =
-    #   =>> Print Minimal Config
+    # Check if this is an end-to-end VLM model
+    is_end_to_end = getattr(model_cfg, 'is_end_to_end_vlm', False)
+    
+    if is_end_to_end:
+        # Load end-to-end VLM (e.g., Qwen3-VL)
+        return _load_vla_end_to_end(
+            model_cfg, checkpoint_pt, norm_stats, hf_token, load_for_training, **kwargs
+        )
+    else:
+        # Load traditional Vision + LLM backbone VLM
+        return _load_vla_prismatic(
+            model_cfg, checkpoint_pt, norm_stats, hf_token, load_for_training, **kwargs
+        )
+
+
+def _load_vla_prismatic(
+    model_cfg: ModelConfig,
+    checkpoint_pt: Path,
+    norm_stats: dict,
+    hf_token: Optional[str],
+    load_for_training: bool,
+    **kwargs,
+) -> CogACT:
+    """Load VLA with traditional Prismatic VLM (separate Vision + LLM backbones)."""
+    # Print Minimal Config
     overwatch.info(
         f"Found Config =>> Loading & Freezing [bold blue]{model_cfg.model_id}[/] with:\n"
         f"             Vision Backbone =>> [bold]{model_cfg.vision_backbone_id}[/]\n"
@@ -194,7 +346,7 @@ def load_vla(
         model_cfg.image_resize_strategy,
     )
 
-    # Load LLM Backbone --> note `inference_mode = True` by default when calling `load()`
+    # Load LLM Backbone
     overwatch.info(f"Loading Pretrained LLM [bold]{model_cfg.llm_backbone_id}[/] via HF Transformers")
     llm_backbone, tokenizer = get_llm_backbone_and_tokenizer(
         model_cfg.llm_backbone_id,
@@ -203,7 +355,7 @@ def load_vla(
         inference_mode=not load_for_training,
     )
 
-    # Load VLM using `from_pretrained` (clobbers HF syntax... eventually should reconcile)
+    # Load VLM
     overwatch.info(f"Loading VLA [bold blue]{model_cfg.model_id}[/] from Checkpoint")
     llm_backbone.llm.resize_token_embeddings(len(tokenizer) + 1 + 1024 + 1)
 
@@ -219,3 +371,47 @@ def load_vla(
     )
 
     return vla
+
+
+def _load_vla_end_to_end(
+    model_cfg: ModelConfig,
+    checkpoint_pt: Path,
+    norm_stats: dict,
+    hf_token: Optional[str],
+    load_for_training: bool,
+    **kwargs,
+) -> CogACT:
+    """Load VLA with end-to-end VLM backbone (e.g., Qwen3-VL)."""
+    # Print Minimal Config
+    overwatch.info(
+        f"Found Config =>> Loading End-to-End VLM [bold blue]{model_cfg.model_id}[/] with:\n"
+        f"             VLM Backbone    =>> [bold]{model_cfg.vlm_backbone_id}[/]\n"
+        f"             Arch Specifier  =>> [bold]{model_cfg.arch_specifier}[/]\n"
+        f"             Checkpoint Path =>> [underline]`{checkpoint_pt}`[/]"
+    )
+
+    # Load VLM Backbone
+    overwatch.info(f"Loading VLM Backbone [bold]{model_cfg.vlm_backbone_id}[/]")
+    vlm_backbone, tokenizer = get_vlm_backbone_and_tokenizer(
+        model_cfg.vlm_backbone_id,
+        vlm_max_length=model_cfg.llm_max_length,
+        hf_token=hf_token,
+        inference_mode=not load_for_training,
+    )
+
+    # For end-to-end VLMs, we use CogACT with the vlm_backbone
+    # The CogACT class needs to handle this case
+    overwatch.info(f"Loading VLA [bold blue]{model_cfg.model_id}[/] from Checkpoint")
+
+    vla = CogACT.from_pretrained_end_to_end(
+        checkpoint_pt,
+        model_cfg.model_id,
+        vlm_backbone,
+        arch_specifier=model_cfg.arch_specifier,
+        freeze_weights=not load_for_training,
+        norm_stats=norm_stats,
+        **kwargs,
+    )
+
+    return vla
+

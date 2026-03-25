@@ -9,6 +9,7 @@ from typing import Callable, Dict, Sequence, Tuple
 
 import torch
 from torch.nn.utils.rnn import pad_sequence
+from transformers.image_processing_base import BatchFeature
 
 # HuggingFace Default / LLaMa-2 IGNORE_INDEX (for labels)
 IGNORE_INDEX = -100
@@ -92,7 +93,7 @@ class PaddedCollatorForLanguageModeling:
 
 
 @dataclass
-class PaddedCollatorForActionPrediction:
+class PaddedCollator:
     model_max_length: int
     pad_token_id: int
     padding_side: str = "right"
@@ -180,7 +181,7 @@ class PaddedCollatorForActionPrediction:
 
 
 @dataclass
-class PaddedCollatorForActionPredictionOe(PaddedCollatorForActionPrediction):
+class PaddedCollatorOe(PaddedCollator):
 
     def __call__(self, instances: Sequence[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
         input_ids, labels = tuple([instance[key] for instance in instances] for key in ("input_ids", "labels"))
@@ -219,6 +220,11 @@ class PaddedCollatorForActionPredictionOe(PaddedCollatorForActionPrediction):
             pixel_values_scene = {
                 k: torch.stack([pixel_values_scene[idx][k] for idx in range(len(input_ids))]) for k in pixel_values_scene[0]
             }
+        elif isinstance(pixel_values_scene[0], BatchFeature):
+           # Handle HuggingFace `BatchFeature` type
+            pixel_values_scene = {
+                k: torch.stack([pixel_values_scene[idx][k] for idx in range(len(input_ids))]) for k in pixel_values_scene[0]
+            }
         else:
             raise ValueError(f"Unsupported `pixel_values_scene` type = {type(pixel_values_scene)}")
         
@@ -229,6 +235,10 @@ class PaddedCollatorForActionPredictionOe(PaddedCollatorForActionPrediction):
             pixel_values_left = {
                 k: torch.stack([pixel_values_left[idx][k] for idx in range(len(input_ids))]) for k in pixel_values_left[0]
             }
+        elif isinstance(pixel_values_left[0], BatchFeature):
+            pixel_values_left = {
+                k: torch.stack([pixel_values_left[idx][k] for idx in range(len(input_ids))]) for k in pixel_values_left[0]
+            }
         else:
             raise ValueError(f"Unsupported `pixel_values_left` type = {type(pixel_values_left)}")
         
@@ -236,6 +246,10 @@ class PaddedCollatorForActionPredictionOe(PaddedCollatorForActionPrediction):
         if isinstance(pixel_values_right[0], torch.Tensor):
             pixel_values_right = torch.stack(pixel_values_right)
         elif isinstance(pixel_values_right[0], dict):
+            pixel_values_right = {
+                k: torch.stack([pixel_values_right[idx][k] for idx in range(len(input_ids))]) for k in pixel_values_right[0]
+            }
+        elif isinstance(pixel_values_right[0], BatchFeature):
             pixel_values_right = {
                 k: torch.stack([pixel_values_right[idx][k] for idx in range(len(input_ids))]) for k in pixel_values_right[0]
             }
@@ -265,6 +279,58 @@ class PaddedCollatorForActionPredictionOe(PaddedCollatorForActionPrediction):
         output = dict(
             pixel_values=pixel_values,
             pixel_utils=pixel_utils,
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=labels,
+            actions=actions,
+            action_masks=action_masks,
+            state=state,
+        )
+        if dataset_names is not None:
+            output["dataset_names"] = dataset_names
+        return output
+
+
+@dataclass
+class PaddedCollatorOeQwenVL3(PaddedCollatorOe):
+    def __call__(self, instances: Sequence[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
+        # input_ids and labels have shape [1, seq_len] from the Qwen3-VL processor; squeeze to [seq_len] for pad_sequence
+        input_ids = [instance["input_ids"].squeeze(0) for instance in instances]
+        labels = [instance["labels"].squeeze(0) for instance in instances]
+
+        if "dataset_name" in instances[0]:
+            dataset_names = [instance["dataset_name"] for instance in instances]
+        else:
+            dataset_names = None
+
+        # Pad sequences to the same length along the sequence dimension → [B, max_seq_len]
+        assert self.padding_side == "right", f"Invalid Tokenizer `{self.padding_side = }`"
+        input_ids = pad_sequence(input_ids, batch_first=True, padding_value=self.pad_token_id)
+        labels = pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX)
+
+        # Truncate (if necessary)
+        input_ids, labels = input_ids[:, : self.model_max_length], labels[:, : self.model_max_length]
+
+        # Get `attention_mask` by checking for `pad_token_id`
+        attention_mask = input_ids.ne(self.pad_token_id)
+
+        # pixel_values: each instance has shape [P_i, patch_dim] (dynamic number of patches per image set).
+        # Qwen3-VL requires all patches concatenated along dim 0, NOT stacked → [Σ P_i, patch_dim]
+        pixel_values = torch.cat([instance["pixel_values"] for instance in instances], dim=0)
+
+        # image_grid_thw: each instance has shape [N_i, 3] (one row per image: T, H_tiles, W_tiles).
+        # Concatenate along dim 0 so the model can slice patches correctly → [Σ N_i, 3]
+        image_grid_thw = torch.cat([instance["image_grid_thw"] for instance in instances], dim=0)
+
+        # Actions, action_masks, state are fixed-size tensors → stack normally → [B, ...]
+        actions = torch.stack([instance["actions"] for instance in instances])
+        action_masks = torch.stack([instance["action_masks"] for instance in instances])
+        state = torch.stack([instance["state"] for instance in instances])
+
+        output = dict(
+            pixel_values=pixel_values,
+            pixel_utils=None,                       # Qwen3-VL does not use `pixel_utils` → set to None
+            image_grid_thw=image_grid_thw,
             input_ids=input_ids,
             attention_mask=attention_mask,
             labels=labels,

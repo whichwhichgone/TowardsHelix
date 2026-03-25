@@ -497,6 +497,57 @@ class Prism_7B_DINOSigLIP_224px(Exp_7B_One_Stage):
     finetune_epochs: int = 2
 
 
+# === End-to-End VLM Configurations ===
+# These models use integrated vision-language processing (no separate vision/llm backbones)
+
+@dataclass
+class Qwen3_VL_4B_Instruct(ModelConfig):
+    model_id: str = "qwen3-vl-4b-instruct"
+    arch_specifier: str = "end-to-end"
+    
+    # For end-to-end VLMs, these are placeholders (vision/LLM are integrated)
+    vision_backbone_id: str = "end-to-end"
+    llm_backbone_id: str = "end-to-end"
+    
+    image_resize_strategy: str = "resize-naive"
+    llm_max_length: int = 4096
+    
+    # Optimization parameters
+    align_epochs: int = 1
+    align_max_steps: Optional[int] = None
+    align_global_batch_size: int = 256
+    align_per_device_batch_size: int = 8
+    
+    align_learning_rate: float = 1e-4
+    align_weight_decay: float = 0.0
+    align_max_grad_norm: float = 1.0
+    align_lr_scheduler_type: str = "linear-warmup+cosine-decay"
+    align_warmup_ratio: float = 0.03
+    align_train_strategy: str = "fsdp-shard-grad-op"
+    
+    finetune_epochs: int = 1
+    finetune_max_steps: Optional[int] = None
+    finetune_global_batch_size: int = 128
+    finetune_per_device_batch_size: int = 8
+    
+    finetune_learning_rate: float = 2e-5
+    finetune_weight_decay: float = 0.1
+    finetune_max_grad_norm: float = 1.0
+    finetune_lr_scheduler_type: str = "linear-warmup+cosine-decay"
+    finetune_warmup_ratio: float = 0.03
+    finetune_train_strategy: str = "fsdp-full-shard"
+    
+    # End-to-end VLM specific attributes
+    vlm_backbone_id: str = "qwen3-vl-4b-instruct"
+    is_end_to_end_vlm: bool = True
+
+
+@dataclass
+class Qwen3_VL_8B_Instruct(Qwen3_VL_4B_Instruct):
+    model_id: str = "qwen3-vl-8b-instruct"
+    vlm_backbone_id: str = "qwen3-vl-8b-instruct"
+
+
 # === Define a Model Registry Enum for Reference & Validation ===
 @unique
 class ModelRegistry(Enum):
@@ -573,6 +624,9 @@ class ModelRegistry(Enum):
     OPT_DINOSIGLIP_224PX_RESIZE_NAIVE = Opt_7B_DINOSigLIP_ViT_SO_p14_224px_Resize_Naive
     PRISM_DINOSIGLIP_224PX_CONTROLLED_7B = Prism_7B_DINOSigLIP_224px_Controlled
     PRISM_DINOSIGLIP_224PX_7B = Prism_7B_DINOSigLIP_224px
+
+    # === End-to-End VLM Models ===
+    QWEN3_VL_4B = Qwen3_VL_4B_Instruct
 
     @property
     def model_id(self) -> str:
