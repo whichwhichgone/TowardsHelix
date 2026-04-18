@@ -418,9 +418,9 @@ class CogACT(nn.Module):
     def predict_action(
         self, image: Image,
         utils: Image,
-        instruction: str, 
-        unnorm_key: Optional[str] = None, 
-        cfg_scale: float = 1.5, 
+        instruction: str,
+        unnorm_key: Optional[str] = None,
+        cfg_scale: float = 1.5,
         use_ddim: bool = False,
         num_ddim_steps: int = 5,
         robot_obs = None,
@@ -439,165 +439,194 @@ class CogACT(nn.Module):
 
         @return Unnormalized (continuous) action vector --> end-effector deltas.
         """
-        image_transform, tokenizer = self.vlm.vision_backbone.image_transform, self.vlm.llm_backbone.tokenizer
-        special_tokens = {"additional_special_tokens": ["<oe>"]}
-        tokenizer.add_special_tokens(special_tokens)
+        robot_obs_tensor = torch.Tensor(robot_obs).unsqueeze(0)
 
-        # Build VLA Prompt
-        prompt_builder = self.vlm.get_prompt_builder()
-        prompt_builder.add_turn(role="human", message=f"What action should the robot take to {instruction.lower()}?")
-        prompt_text = prompt_builder.get_prompt()
-        # Prepare Inputs
-        input_ids = tokenizer(prompt_text, truncation=True, return_tensors="pt").input_ids.to(self.vlm.device)
-        if isinstance(tokenizer, LlamaTokenizerFast):
-            # Note: We need to add this special empty token ('') after the colon (':') token in "ASSISTANT:"
-            #       insert it to match the inputs seen at training time. The empty token is at index 29871.
-            #       We also need to add the special cognition token at index 2 (i.e. the EOS token).
-            input_ids = torch.cat(
-                (input_ids, torch.unsqueeze(torch.Tensor([29871, 2]).long(), dim=0).to(self.vlm.device)), dim=1
+        if self.e2e_vlm:
+            # ------------------------------------------------------------------ #
+            # End-to-end VLM inference (e.g., Qwen3-VL)                          #
+            # ------------------------------------------------------------------ #
+            prompt_builder_fn = self.vlm.vlm_backbone.prompt_builder_fn
+            autocast_dtype = self.vlm.vlm_backbone.half_precision_dtype
+
+            img_scene, image_hand_left = image["scene"], image["left"]
+            img_obs = [img_scene, image_hand_left]            
+            mm_utils = img_obs + utils
+
+            # Build multimodal instruction string with <oe> placeholders
+            oe_placeholders = "<oe>" * len(img_obs)
+            oe_lang = f"Given the observation {oe_placeholders}; what action should the robot take to {instruction}?"
+
+            # Interleave text tokens and image tokens into a content list
+            content = []
+            parts = oe_lang.split("<oe>")
+            for i, token in enumerate(parts):
+                if token:
+                    content.append({"type": "text", "text": token})
+                if i < len(parts) - 1:
+                    content.append({"type": "image", "image": mm_utils[i]})
+
+            # Construct the messages for the model
+            messages = [
+                {"role": "user", "content": content},
+                {"role": "assistant", "content": ""},
+            ]
+
+            # Prepare inputs
+            inputs = prompt_builder_fn(
+                messages, tokenize=True, add_generation_prompt=False,
+                return_dict=True, return_tensors="pt"
             )
+
+            input_ids = inputs["input_ids"].to(self.vlm.device)
+            attention_mask = inputs["attention_mask"].to(self.vlm.device)
+            pixel_values = inputs["pixel_values"].to(self.vlm.device)
+            image_grid_thw = inputs["image_grid_thw"].to(self.vlm.device)
+            labels = torch.ones_like(input_ids) * IGNORE_INDEX
+            robot_obs_proj = self.state_proj(robot_obs_tensor.to(self.vlm.device))
+
+            with torch.autocast("cuda", dtype=autocast_dtype, enabled=self.vlm.enable_mixed_precision_training):
+                output = self.vlm.forward(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    pixel_values=pixel_values,
+                    labels=labels,
+                    output_hidden_states=True,
+                    image_grid_thw=image_grid_thw,
+                )
+
+            last_hidden = output.hidden_states[-1]
+            fused_attention_mask = ~output["fused_attention_mask"].bool()
+
         else:
-            raise ValueError(f"Unsupported `tokenizer` type = {type(tokenizer)}")
+            # ------------------------------------------------------------------ #
+            # Non-end-to-end VLM inference (PrismaticVLM)                        #
+            # ------------------------------------------------------------------ #
+            image_transform, tokenizer = self.vlm.vision_backbone.image_transform, self.vlm.llm_backbone.tokenizer
+            special_tokens = {"additional_special_tokens": ["<oe>"]}
+            tokenizer.add_special_tokens(special_tokens)
 
-        # Preprocess Image
-        image_scene, image_hand_left = image["scene"], image["left"]
-        pixel_values_scene = image_transform(image_scene)
-        if isinstance(pixel_values_scene, torch.Tensor):
-            pixel_values_scene = pixel_values_scene[None, ...].to(self.vlm.device)
-        elif isinstance(pixel_values_scene, dict):
-            pixel_values_scene = {k: v[None, ...].to(self.vlm.device) for k, v in pixel_values_scene.items()}
-        else:
-            raise ValueError(f"Unsupported `pixel_values` type = {type(pixel_values_scene)}")
+            # Build VLA Prompt
+            prompt_builder = self.vlm.get_prompt_builder()
+            prompt_builder.add_turn(role="human", message=f"What action should the robot take to {instruction.lower()}?")
+            prompt_text = prompt_builder.get_prompt()
+            # Prepare Inputs
+            input_ids = tokenizer(prompt_text, truncation=True, return_tensors="pt").input_ids.to(self.vlm.device)
+            if isinstance(tokenizer, LlamaTokenizerFast):
+                # Note: We need to add this special empty token ('') after the colon (':') token in "ASSISTANT:"
+                #       insert it to match the inputs seen at training time. The empty token is at index 29871.
+                #       We also need to add the special cognition token at index 2 (i.e. the EOS token).
+                input_ids = torch.cat(
+                    (input_ids, torch.unsqueeze(torch.Tensor([29871, 2]).long(), dim=0).to(self.vlm.device)), dim=1
+                )
+            else:
+                raise ValueError(f"Unsupported `tokenizer` type = {type(tokenizer)}")
 
-        pixel_values_left = image_transform(image_hand_left)
-        if isinstance(pixel_values_left, torch.Tensor):
-            pixel_values_left = pixel_values_left[None, ...].to(self.vlm.device)
-        elif isinstance(pixel_values_left, dict):
-            pixel_values_left = {k: v[None, ...].to(self.vlm.device) for k, v in pixel_values_left.items()}
-        else:
-            raise ValueError(f"Unsupported `pixel_values` type = {type(pixel_values_left)}")
+            # Preprocess Image
+            image_scene, image_hand_left = image["scene"], image["left"]
+            pixel_values_scene = image_transform(image_scene)
+            if isinstance(pixel_values_scene, torch.Tensor):
+                pixel_values_scene = pixel_values_scene[None, ...].to(self.vlm.device)
+            elif isinstance(pixel_values_scene, dict):
+                pixel_values_scene = {k: v[None, ...].to(self.vlm.device) for k, v in pixel_values_scene.items()}
+            else:
+                raise ValueError(f"Unsupported `pixel_values` type = {type(pixel_values_scene)}")
 
-        pixel_values = {"scene" : pixel_values_scene, "left" : pixel_values_left}
-        pixel_utils = []
-        for util_image in utils:
-            util_image = image_transform(util_image)
-            util_image = {k: v[None, ...].to(self.vlm.device) for k, v in util_image.items()}
-            pixel_utils.append(util_image)
+            pixel_values_left = image_transform(image_hand_left)
+            if isinstance(pixel_values_left, torch.Tensor):
+                pixel_values_left = pixel_values_left[None, ...].to(self.vlm.device)
+            elif isinstance(pixel_values_left, dict):
+                pixel_values_left = {k: v[None, ...].to(self.vlm.device) for k, v in pixel_values_left.items()}
+            else:
+                raise ValueError(f"Unsupported `pixel_values` type = {type(pixel_values_left)}")
 
-        keys = pixel_utils[0].keys()
-        pixel_utils = {k: torch.cat([d[k] for d in pixel_utils], dim=0) for k in keys}
-        pixel_utils = [pixel_utils]    # add the batch dimension 
+            pixel_values = {"scene" : pixel_values_scene, "left" : pixel_values_left}
+            pixel_utils = []
+            for util_image in utils:
+                util_image = image_transform(util_image)
+                util_image = {k: v[None, ...].to(self.vlm.device) for k, v in util_image.items()}
+                pixel_utils.append(util_image)
 
-        # Invoke super().generate --> taps into `GenerationMixin` which (redirects) to `forward()`
-        autocast_dtype = self.vlm.llm_backbone.half_precision_dtype
+            keys = pixel_utils[0].keys()
+            pixel_utils = {k: torch.cat([d[k] for d in pixel_utils], dim=0) for k in keys}
+            pixel_utils = [pixel_utils]    # add the batch dimension
 
-        # Generate cognition feature through vlm
-        # We don't need to compute LM loss here
-        labels = torch.ones_like(input_ids).to(self.vlm.device) * IGNORE_INDEX
-        attention_mask = torch.ones_like(input_ids, dtype=torch.bool).to(self.vlm.device)
-        robot_obs = torch.Tensor(robot_obs).unsqueeze(0).to(self.vlm.device)
-        robot_obs = self.state_proj(robot_obs)
-        with torch.autocast("cuda", dtype=autocast_dtype, enabled=self.vlm.enable_mixed_precision_training):
-            # fmt: off
-            '''
-            output = super(PrismaticVLM, self.vlm).generate(
-                input_ids=input_ids,                            # Shape: [1, seq]
-                pixel_values=pixel_values,                      # Shape: [1, 3, res, res] or Dict[str, ...]
-                pixel_utils=pixel_utils,
-                max_new_tokens=1,
-                output_hidden_states=True,
-                return_dict_in_generate=True,
-                **kwargs,
-            )
-            '''
-            output = self.vlm.forward(
-                input_ids=input_ids,                            # Shape: [1, seq]
-                attention_mask=attention_mask,
-                pixel_values=pixel_values,                      # Shape: [1, 3, res, res] or Dict[str, ...]
-                pixel_utils=pixel_utils,
-                labels=labels,
-                output_hidden_states=True, 
-                **kwargs
-            )
-            # fmt: on
+            autocast_dtype = self.vlm.llm_backbone.half_precision_dtype
+            labels = torch.ones_like(input_ids).to(self.vlm.device) * IGNORE_INDEX
+            attention_mask = torch.ones_like(input_ids, dtype=torch.bool).to(self.vlm.device)
+            robot_obs_proj = self.state_proj(robot_obs_tensor.to(self.vlm.device))
 
-        # extract the last hidden state and the learnable EOS token feature
-        last_hidden = output.hidden_states[-1]
-        fused_attention_mask = ~output["fused_attention_mask"]
+            with torch.autocast("cuda", dtype=autocast_dtype, enabled=self.vlm.enable_mixed_precision_training):
+                output = self.vlm.forward(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    pixel_values=pixel_values,
+                    pixel_utils=pixel_utils,
+                    labels=labels,
+                    output_hidden_states=True,
+                    **kwargs
+                )
 
-        # extract the visual token number
-        if self.vlm.vision_backbone.featurizer is not None:
-            num_patch = self.vlm.vision_backbone.featurizer.patch_embed.num_patches
-        elif hasattr(self.vlm.vision_backbone, 'siglip_featurizer') and self.vlm.vision_backbone.siglip_featurizer is not None:
-            num_patch = self.vlm.vision_backbone.siglip_featurizer.patch_embed.num_patches
-        else:
-            raise ValueError("No vision backbone found")
-        
-        # Extract cognition feature
-        cognition_features = output.hidden_states[-1][:,-1,:]
-        assert (cognition_features.shape[0], cognition_features.shape[1]) == (1,4096), "Batch size must be 1 for action prediction"
+            last_hidden = output.hidden_states[-1]
+            fused_attention_mask = ~output["fused_attention_mask"]
+
+        # ------------------------------------------------------------------ #
+        # Shared: project hidden states and run diffusion action sampling     #
+        # ------------------------------------------------------------------ #
+        model_dtype = next(self.action_model.net.parameters()).dtype
+        B = 1
+
+        robot_obs_proj = robot_obs_proj.unsqueeze(1).to(model_dtype)   # [B, 1, D]
+        cognition_features = robot_obs_proj                             # [B, 1, D]
+        hidden_features = self.hidden_proj(last_hidden).to(model_dtype)
+
         using_cfg = cfg_scale > 1.0
 
-        model_dtype = next(self.action_model.net.parameters()).dtype
-        B = cognition_features.shape[0]
-
-        cognition_features = cognition_features.unsqueeze(1).to(model_dtype)    # [B, 1, D]
-        robot_obs = robot_obs.unsqueeze(1).to(model_dtype)                      # [B, 1, D]
-        cognition_features = torch.cat([robot_obs], dim=1)  # [B, 2, D]
-        hidden_features = self.hidden_proj(last_hidden)  
-
         # Sample random noise
-        noise = torch.randn(B, self.future_action_window_size+1, self.action_model.in_channels, device=cognition_features.device).to(model_dtype)  #[B, T, D]
-    
-        # Setup classifier-free guidance:
+        noise = torch.randn(
+            B, self.future_action_window_size + 1, self.action_model.in_channels,
+            device=cognition_features.device,
+        ).to(model_dtype)
+
+        # Setup classifier-free guidance
         if using_cfg:
             noise = torch.cat([noise, noise], 0)
             uncondition = self.action_model.net.z_embedder.uncondition
-            uncondition = uncondition.unsqueeze(0)  #[1, D]
-            uncondition = uncondition.expand(cognition_features.shape[0], cognition_features.shape[1], -1) #[B, 1, D]
+            uncondition = uncondition.unsqueeze(0).expand(B, cognition_features.shape[1], -1)
             z = torch.cat([cognition_features, uncondition], 0)
             hidden_features = torch.cat([hidden_features, hidden_features], 0)
             fused_attention_mask = torch.cat([fused_attention_mask, fused_attention_mask], 0)
-            cfg_scale = cfg_scale
             model_kwargs = dict(z=z, cfg_scale=cfg_scale, context=hidden_features, context_mask=fused_attention_mask)
             sample_fn = self.action_model.net.forward_with_cfg
         else:
             model_kwargs = dict(z=cognition_features, context=hidden_features, context_mask=fused_attention_mask)
             sample_fn = self.action_model.net.forward
 
-        # DDIM Sampling
+        # DDIM or DDPM sampling
         if use_ddim and num_ddim_steps is not None:
             if self.action_model.ddim_diffusion is None:
                 self.action_model.create_ddim(ddim_step=num_ddim_steps)
-            samples = self.action_model.ddim_diffusion.ddim_sample_loop(sample_fn, 
-                                                                noise.shape, 
-                                                                noise, 
-                                                                clip_denoised=False,
-                                                                model_kwargs=model_kwargs,
-                                                                progress=False,
-                                                                device=cognition_features.device,
-                                                                eta=0.0
-                                                                )
+            samples = self.action_model.ddim_diffusion.ddim_sample_loop(
+                sample_fn, noise.shape, noise,
+                clip_denoised=False, model_kwargs=model_kwargs,
+                progress=False, device=cognition_features.device, eta=0.0,
+            )
         else:
-            # DDPM Sampling
-            samples = self.action_model.diffusion.p_sample_loop(sample_fn, 
-                                                                    noise.shape, 
-                                                                    noise, 
-                                                                    clip_denoised=False,
-                                                                    model_kwargs=model_kwargs,
-                                                                    progress=False,
-                                                                    device=cognition_features.device
-                                                                    )
+            samples = self.action_model.diffusion.p_sample_loop(
+                sample_fn, noise.shape, noise,
+                clip_denoised=False, model_kwargs=model_kwargs,
+                progress=False, device=cognition_features.device,
+            )
+
         if using_cfg:
             samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
         normalized_actions = samples[0].cpu().numpy()
 
-        # Un-normalize Actions        
+        # Un-normalize Actions
         action_norm_stats = self.get_action_stats(unnorm_key)
         mask = action_norm_stats.get("mask", np.ones_like(action_norm_stats["q01"], dtype=bool))
         action_high, action_low = np.array(action_norm_stats["q99"]), np.array(action_norm_stats["q01"])
         normalized_actions = np.clip(normalized_actions, -1, 1)
-        normalized_actions[:, 6] = np.where(normalized_actions[:, 6] < 0.75, 0, 1) 
+        normalized_actions[:, 6] = np.where(normalized_actions[:, 6] < 0.5, 0, 1)
         actions = np.where(
             mask,
             0.5 * (normalized_actions + 1) * (action_high - action_low) + action_low,
