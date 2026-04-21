@@ -18,6 +18,7 @@ class VLAServer:
     def __init__(self, args):
         model_path = os.path.expanduser(args.model_path)
         self.instruction_type = None
+        self.unnorm_key = args.unnorm_key
 
         # Load the model
         self.vla = load_vla(
@@ -91,7 +92,7 @@ class VLAServer:
                 img_obs,
                 img_utils,
                 oe_lang,
-                unnorm_key="calvin_abc2d_oe_baseline",
+                unnorm_key=self.unnorm_key,
                 cfg_scale=1.5,
                 use_ddim=True,
                 num_ddim_steps=10,
@@ -127,6 +128,12 @@ if __name__ == "__main__":
         help="Future action window size (default: 15)",
     )
     parser.add_argument("--port", type=int, default=9002, help="Port number for flask server")
+    parser.add_argument(
+        "--unnorm-key",
+        type=str,
+        default="calvin_abc2d_oe",
+        help="Unnormalization key for dataset statistics",
+    )
     parser.add_argument(
         "--debug",
         action="store_false",
@@ -227,8 +234,8 @@ if __name__ == "__main__":
             robot_obs_norm = os.path.dirname(os.path.dirname(args.model_path)) + "/dataset_statistics.json"
             with open(robot_obs_norm, "r") as f:
                 norm_stats = json.load(f)
-            robot_obs_low = np.array(norm_stats["calvin_abc2d_oe_baseline"]["proprio"]["q01"])
-            robot_obs_high = np.array(norm_stats["calvin_abc2d_oe_baseline"]["proprio"]["q99"])
+            robot_obs_low = np.array(norm_stats[args.unnorm_key]["proprio"]["q01"])
+            robot_obs_high = np.array(norm_stats[args.unnorm_key]["proprio"]["q99"])
             robot_obs = np.array(robot_obs)
             robot_obs = np.clip(2 * (robot_obs - robot_obs_low) / (robot_obs_high - robot_obs_low + 1e-8) - 1, -1, 1)
             action = vla_robot.generate_action(img_obs, img_utils, oe_lang, robot_obs)

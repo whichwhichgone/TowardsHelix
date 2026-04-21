@@ -144,13 +144,43 @@ class Exp_Qwen3VL_4B_OXE(VLAConfig):
     train_strategy: str = "fsdp-full-shard"
 
 
-@dataclass  
+@dataclass
 class Exp_Qwen3VL_4B_Bridge(Exp_Qwen3VL_4B_OXE):
     """VLA config for Qwen3-VL-4B finetuning on Bridge dataset."""
     vla_id: str = "qwen3-vl-4b+bridge+diffusion"
     data_mix: str = "bridge"
     shuffle_buffer_size: int = 1_000
     epochs: int = 1000
+
+
+@dataclass
+class Exp_Qwen3VL_8B_OXE(VLAConfig):
+    vla_id: str = "qwen3-vl-8b+oxe+diffusion"
+    base_vlm: Union[str, Path] = "qwen3-vl-8b-instruct"
+
+    freeze_vision_backbone: bool = True
+    freeze_llm_backbone: bool = False
+    unfreeze_last_llm_layer: bool = False
+
+    # Data Mixture Parameters
+    data_mix: str = "oxe_magic_soup_plus_minus"
+    shuffle_buffer_size: int = 1_000
+
+    # Optimization Parameters
+    epochs: int = 100
+    max_steps: Optional[int] = None
+
+    expected_world_size: int = 8
+    global_batch_size: int = 64
+    per_device_batch_size: int = 8
+
+    learning_rate: float = 2e-5
+    weight_decay: float = 0.0
+    max_grad_norm: float = 1.0
+    lr_scheduler_type: str = "constant"
+    warmup_ratio: float = 0.0
+
+    train_strategy: str = "fsdp-full-shard"
 
 
 # === Define a VLA Registry Enum for Reference & Validation ===
@@ -165,6 +195,7 @@ class VLARegistry(Enum):
     # === Qwen3-VL VLA Configs ===
     QWEN3VL_4B_OXE = Exp_Qwen3VL_4B_OXE
     QWEN3VL_4B_BRIDGE = Exp_Qwen3VL_4B_Bridge
+    QWEN3VL_8B_OXE = Exp_Qwen3VL_8B_OXE
 
     @property
     def vla_id(self) -> str:

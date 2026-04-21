@@ -627,6 +627,7 @@ class ModelRegistry(Enum):
 
     # === End-to-End VLM Models ===
     QWEN3_VL_4B = Qwen3_VL_4B_Instruct
+    QWEN3_VL_8B = Qwen3_VL_8B_Instruct
 
     @property
     def model_id(self) -> str:
