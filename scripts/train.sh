@@ -11,7 +11,7 @@ export WANDB_API_KEY=83793606f810aa3d385ea5d12dbd352514ac54e1
     --nproc-per-node 8 \
     "${PWD}/scripts/train.py" \
     --vla.type "qwen3-vl-8b+oxe+diffusion" \
-    --vla.data_mix "calvin_abc2d_oe_baseline" \
+    --vla.data_mix "calvin_abc2d_oe" \
     --vla.expected_world_size 8 \
     --vla.global_batch_size 128 \
     --vla.per_device_batch_size 16 \
@@ -20,7 +20,7 @@ export WANDB_API_KEY=83793606f810aa3d385ea5d12dbd352514ac54e1
     --vla.epochs 3 \
     --data_root_dir "/zhaowei/data/flex_vla_data" \
     --run_root_dir "./logs" \
-    --run_id "calvin_abc2d_oe_baseline_h10_8b" \
+    --run_id "calvin_abc2d_oe_h10_8b" \
     --image_aug "False" \
     --wandb_project "nips2026_flex" \
     --wandb_entity "yijiulanpishu" \
