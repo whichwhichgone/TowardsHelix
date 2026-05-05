@@ -5,6 +5,7 @@ action_model.py
 from action_model.models import DiT
 from action_model import create_diffusion
 from . import gaussian_diffusion as gd
+from .conditional_flow_matching import ConditionalFlowMatcher as CFM
 import torch
 from torch import nn
 
@@ -43,6 +44,7 @@ class ActionModel(nn.Module):
             learn_sigma = False
         self.past_action_window_size = past_action_window_size
         self.future_action_window_size = future_action_window_size
+        self.flow_matching = CFM(sigma=0.0)
         self.net = DiT_models[model_type](
                                         token_size = token_size, 
                                         in_channels=in_channels, 
@@ -80,3 +82,23 @@ class ActionModel(nn.Module):
                                                learn_sigma = False
                                                )
         return self.ddim_diffusion
+
+    # flow matching loss
+    def cfm_loss(self, x_action, z_cognition, context, context_mask):
+        """
+        Compute the CFM loss for the ActionModel.
+        Args:
+            x_action: Ground truth action tensor.
+            z_cognition: Cognition tensor.
+            context: Context from VLM.
+            context_mask: Context mask from VLM.
+        Returns:
+            loss: Computed CFM loss.
+        """
+
+        x_source = torch.randn_like(x_action)
+        timestep, x_t, u_t = self.flow_matching.sample_location_and_conditional_flow(x0=x_source, x1=x_action)
+        v_t = self.net(x_t, timestep, z_cognition, context=context, context_mask=context_mask)
+
+        loss = ((v_t - u_t) ** 2).mean()
+        return loss

@@ -11,6 +11,7 @@ from typing import Callable, Dict, List, Optional, Type, Union, Tuple
 from copy import deepcopy
 
 import torch
+import torchdiffeq
 import torch.nn as nn
 import numpy as np
 from PIL.Image import Image
@@ -67,7 +68,7 @@ class CogACT(nn.Module):
             )
         self.state_proj = nn.Linear(15, token_size, bias=False)
         hidden_size = vlm.vlm_backbone.embed_dim if e2e_vlm else vlm.llm_backbone.embed_dim
-        self.hidden_proj = nn.Linear(hidden_size, 768, bias=False)                       # 768 is the hidden size of DiT-B
+        self.hidden_proj = nn.Linear(hidden_size, self.action_model.net.hidden_size, bias=False)
         self.vlm = vlm
         self.future_action_window_size = future_action_window_size
         self.past_action_window_size = past_action_window_size
@@ -84,6 +85,7 @@ class CogACT(nn.Module):
         # Diffusion head is always trainable
         self._trainable_module_keys = ['action_model', 'state_proj', 'hidden_proj']
         self.norm_stats = norm_stats
+        self.use_cfm = True
 
     @property
     def trainable_module_keys(self) -> List[str]:
@@ -133,6 +135,15 @@ class CogACT(nn.Module):
             base["pixel_utils"] = pixel_utils
         return base
 
+    def _project_vlm_hidden_states_for_dit(self, hidden_states):
+        num_dit_blocks = len(self.action_model.net.blocks)
+        assert len(hidden_states) >= num_dit_blocks, (
+            f"VLM returned {len(hidden_states)} hidden states, but the action DiT has "
+            f"{num_dit_blocks} blocks."
+        )
+        hidden_features = [self.hidden_proj(hidden_state) for hidden_state in hidden_states[-num_dit_blocks:]]
+        return torch.stack(hidden_features, dim=1)
+
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -160,26 +171,29 @@ class CogACT(nn.Module):
             inputs_embeds, past_key_values, use_cache, output_attentions,
             output_hidden_states, return_dict, image_grid_thw,
         )
+        vlm_kwargs["output_hidden_states"] = True
         output: CausalLMOutputWithPast = self.vlm(**vlm_kwargs)
 
-        # extract the last hidden state and its corresponding attention masks
-        last_hidden = output.hidden_states[-1]
+        # extract the last DiT-depth hidden states and their corresponding attention masks
         fused_attention_mask = ~output["fused_attention_mask"]
 
         # extract the cognition feature
         state_features = self.state_proj(state)                                                 # [B, 1, D]
-        hidden_features = self.hidden_proj(last_hidden)                                                     
+        hidden_features = self._project_vlm_hidden_states_for_dit(output.hidden_states)
 
         actions_future = actions[:, -(self.future_action_window_size+1):, :]
         
         # Repeat 'actions' 'repeated_diffusion_steps' times, resulting in [repeated_diffusion_steps*B, T, D]
         actions_repeated = actions_future.repeat(repeated_diffusion_steps, 1, 1)
         state_features_repeated = state_features.repeat(repeated_diffusion_steps, 1, 1) # [repeated_diffusion_steps*B, 1, D]
-        hidden_features_repeated = hidden_features.repeat(repeated_diffusion_steps, 1, 1)
+        hidden_features_repeated = hidden_features.repeat(repeated_diffusion_steps, 1, 1, 1)
         hidden_mask_repeated = fused_attention_mask.repeat(repeated_diffusion_steps, 1)
 
         # Action model forward and compute loss
-        loss = self.action_model.loss(actions_repeated, state_features_repeated, context=hidden_features_repeated, context_mask=hidden_mask_repeated)
+        if self.use_cfm:
+            loss = self.action_model.cfm_loss(actions_repeated, state_features_repeated, context=hidden_features_repeated, context_mask=hidden_mask_repeated)
+        else:
+            loss = self.action_model.loss(actions_repeated, state_features_repeated, context=hidden_features_repeated, context_mask=hidden_mask_repeated)
         return loss, output
 
     def get_fsdp_wrapping_policy(self) -> Callable:
@@ -494,7 +508,6 @@ class CogACT(nn.Module):
                     image_grid_thw=image_grid_thw,
                 )
 
-            last_hidden = output.hidden_states[-1]
             fused_attention_mask = ~output["fused_attention_mask"].bool()
 
         else:
@@ -566,7 +579,6 @@ class CogACT(nn.Module):
                     **kwargs
                 )
 
-            last_hidden = output.hidden_states[-1]
             fused_attention_mask = ~output["fused_attention_mask"]
 
         # ------------------------------------------------------------------ #
@@ -577,7 +589,7 @@ class CogACT(nn.Module):
 
         robot_obs_proj = robot_obs_proj.unsqueeze(1).to(model_dtype)   # [B, 1, D]
         cognition_features = robot_obs_proj                             # [B, 1, D]
-        hidden_features = self.hidden_proj(last_hidden).to(model_dtype)
+        hidden_features = self._project_vlm_hidden_states_for_dit(output.hidden_states).to(model_dtype)
 
         using_cfg = cfg_scale > 1.0
 
@@ -588,38 +600,52 @@ class CogACT(nn.Module):
         ).to(model_dtype)
 
         # Setup classifier-free guidance
-        if using_cfg:
-            noise = torch.cat([noise, noise], 0)
-            uncondition = self.action_model.net.z_embedder.uncondition
-            uncondition = uncondition.unsqueeze(0).expand(B, cognition_features.shape[1], -1)
-            z = torch.cat([cognition_features, uncondition], 0)
-            hidden_features = torch.cat([hidden_features, hidden_features], 0)
-            fused_attention_mask = torch.cat([fused_attention_mask, fused_attention_mask], 0)
-            model_kwargs = dict(z=z, cfg_scale=cfg_scale, context=hidden_features, context_mask=fused_attention_mask)
-            sample_fn = self.action_model.net.forward_with_cfg
-        else:
-            model_kwargs = dict(z=cognition_features, context=hidden_features, context_mask=fused_attention_mask)
-            sample_fn = self.action_model.net.forward
+        if not self.use_cfm:
+            if using_cfg:
+                noise = torch.cat([noise, noise], 0)
+                uncondition = self.action_model.net.z_embedder.uncondition
+                uncondition = uncondition.unsqueeze(0).expand(B, cognition_features.shape[1], -1)
+                z = torch.cat([cognition_features, uncondition], 0)
+                hidden_features = torch.cat([hidden_features, hidden_features], 0)
+                fused_attention_mask = torch.cat([fused_attention_mask, fused_attention_mask], 0)
+                model_kwargs = dict(z=z, cfg_scale=cfg_scale, context=hidden_features, context_mask=fused_attention_mask)
+                sample_fn = self.action_model.net.forward_with_cfg
+            else:
+                model_kwargs = dict(z=cognition_features, context=hidden_features, context_mask=fused_attention_mask)
+                sample_fn = self.action_model.net.forward
 
-        # DDIM or DDPM sampling
-        if use_ddim and num_ddim_steps is not None:
-            if self.action_model.ddim_diffusion is None:
-                self.action_model.create_ddim(ddim_step=num_ddim_steps)
-            samples = self.action_model.ddim_diffusion.ddim_sample_loop(
-                sample_fn, noise.shape, noise,
-                clip_denoised=False, model_kwargs=model_kwargs,
-                progress=False, device=cognition_features.device, eta=0.0,
-            )
-        else:
-            samples = self.action_model.diffusion.p_sample_loop(
-                sample_fn, noise.shape, noise,
-                clip_denoised=False, model_kwargs=model_kwargs,
-                progress=False, device=cognition_features.device,
-            )
+            # DDIM or DDPM sampling
+            if use_ddim and num_ddim_steps is not None:
+                if self.action_model.ddim_diffusion is None:
+                    self.action_model.create_ddim(ddim_step=num_ddim_steps)
+                samples = self.action_model.ddim_diffusion.ddim_sample_loop(
+                    sample_fn, noise.shape, noise,
+                    clip_denoised=False, model_kwargs=model_kwargs,
+                    progress=False, device=cognition_features.device, eta=0.0,
+                )
+            else:
+                samples = self.action_model.diffusion.p_sample_loop(
+                    sample_fn, noise.shape, noise,
+                    clip_denoised=False, model_kwargs=model_kwargs,
+                    progress=False, device=cognition_features.device,
+                )
 
-        if using_cfg:
-            samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
-        normalized_actions = samples[0].cpu().numpy()
+            if using_cfg:
+                samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
+            normalized_actions = samples[0].cpu().numpy()
+        else:
+            # CFM: integrate the learned vector field from t=0 (noise) to t=1 (action)
+            if using_cfg:
+                overwatch.warning("cfg_scale > 1.0 is ignored when using CFM sampling.")
+            samples = torchdiffeq.odeint(
+                lambda t, x: self.action_model.net.forward(
+                    x, t.view(1), cognition_features, hidden_features, fused_attention_mask
+                ),
+                noise,
+                torch.linspace(0, 1, num_ddim_steps + 1, device=cognition_features.device),
+                method='rk4',
+            )
+            normalized_actions = samples[-1][0].cpu().numpy()
 
         # Un-normalize Actions
         action_norm_stats = self.get_action_stats(unnorm_key)

@@ -205,6 +205,7 @@ class DiT(nn.Module):
         self.learn_sigma = learn_sigma
         self.in_channels = in_channels
         self.out_channels = in_channels * 2 if learn_sigma else in_channels
+        self.hidden_size = hidden_size
         self.class_dropout_prob = class_dropout_prob
         self.num_heads = num_heads
         self.past_action_window_size = past_action_window_size
@@ -272,8 +273,11 @@ class DiT(nn.Module):
         c = t.unsqueeze(1) + z                              # (N, 1, D)
         x = torch.cat((c, x), dim=1)                        # (N, T+1, D)
         x = x + self.positional_embedding                   # (N, T+1, D)
-        for block in self.blocks:
-            x = block(x, context=context, context_mask=context_mask)                                    # (N, T+1, D)
+        assert context is not None, "Error: context is required for DiT cross attention."
+        assert context.dim() == 4, "Error: context must have shape (N, num_blocks, M, D)."
+        assert context.size(1) == len(self.blocks), "Error: context must provide one hidden state per DiT block."
+        for block, block_context in zip(self.blocks, context.unbind(dim=1)):
+            x = block(x, context=block_context, context_mask=context_mask)                               # (N, T+1, D)
         x = self.final_layer(x)                             # (N, T+1, out_channels)
         return x[:, 1:, :]     # (N, T, C)
 

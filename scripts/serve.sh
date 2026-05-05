@@ -10,7 +10,7 @@ for IDX in $(seq 0 $((CHUNKS-1))); do
     port=$(($IDX+9002))
     echo "Running port $port on GPU ${GPULIST[$IDX]}"
     CUDA_VISIBLE_DEVICES=${GPULIST[$IDX]} python serve/flask_server.py \
-        --model-path "/zhaowei/workspace/CogACT/logs/calvin_abc2d_oe_h10_8b/checkpoints/step-008372-epoch-01-loss=0.1151.pt" \
+        --model-path "/zhaowei/workspace/CogACT/logs/calvin_abc2d_oe_h10_layerwise_flow/checkpoints/step-016744-epoch-02-loss=0.1447.pt" \
         --unnorm-key "calvin_abc2d_oe" \
         --future-action-window-size 9 \
         --port $port &

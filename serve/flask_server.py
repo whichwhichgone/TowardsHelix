@@ -108,7 +108,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model-path",
         type=str,
-        default="/zhaowei/workspace/CogACT/logs/calvin_abc2d_oe_baseline/checkpoints/step-016744-epoch-02-loss=0.0619.pt",
+        default="/zhaowei/workspace/CogACT/logs/calvin_abc2d_oe_h10_layerwise_flow/checkpoints/step-016744-epoch-02-loss=0.1447.pt",
     )
     parser.add_argument(
         "--load-for-training",
@@ -124,7 +124,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--future-action-window-size",
         type=int,
-        default=15,
+        default=9,
         help="Future action window size (default: 15)",
     )
     parser.add_argument("--port", type=int, default=9002, help="Port number for flask server")

@@ -19,6 +19,8 @@
 | [Exp-009](#exp-009) | 2026-04-21 | step-016744-epoch-02-loss=0.0627 (calvin_abc2d_oe_h10_8b) | calvin_abc2d_oe | DiT-B | 9 | 1.5 | 10 | Avg seq len 3.52 |
 | [Exp-010](#exp-010) | 2026-04-24 | step-025116-epoch-03-loss=0.0413 (calvin_abc2d_oe_h10_8b) | calvin_abc2d_oe | DiT-B | 9 | 1.5 | 10 | Avg seq len 3.721 |
 | [Exp-011](#exp-011) | 2026-04-24 | step-008372-epoch-01-loss=0.1151 (calvin_abc2d_oe_h10_8b) | calvin_abc2d_oe | DiT-B | 9 | 1.5 | 10 | Avg seq len 3.001 |
+| [Exp-012](#exp-012) | 2026-04-27 | step-016744-epoch-02-loss=0.0585 (calvin_abc2d_oe_h10_layerwise) | calvin_abc2d_oe | DiT-B | 9 | 1.5 | 10 | Avg seq len 3.526 |
+| [Exp-013](#exp-013) | 2026-04-28 | step-025116-epoch-03-loss=0.0451 (calvin_abc2d_oe_h10_layerwise) | calvin_abc2d_oe | DiT-B | 9 | 1.5 | 10 | Avg seq len 3.68 |
 
 ---
 
@@ -1076,6 +1078,196 @@ CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
 | `push_blue_block_left` | 29 / 62 | 46.8% |
 | `lift_red_block_drawer` | 11 / 14 | 78.6% |
 | `push_blue_block_right` | 18 / 63 | 28.6% |
+
+---
+
+## Exp-012
+
+**日期：** 2026-04-27
+
+### serve.sh 配置
+
+```bash
+CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
+# 每张 GPU 启动一个 flask server，端口从 9002 依次递增
+# GPU 0 → port 9002, GPU 1 → port 9003, ..., GPU 7 → port 9009
+```
+
+### flask_server.py 参数
+
+| 参数 | 值 | 说明 |
+|------|----|------|
+| `--model-path` | `/zhaowei/workspace/CogACT/logs/calvin_abc2d_oe_h10_layerwise/checkpoints/step-016744-epoch-02-loss=0.0585.pt` | 模型 checkpoint 路径（layerwise 架构，目录 calvin_abc2d_oe_h10_layerwise） |
+| `--unnorm-key` | `calvin_abc2d_oe` | 动作归一化统计键 |
+| `--future-action-window-size` | `9` | 预测未来动作窗口大小（输出 10 步，index 0~9） |
+| `--port` | `9002`（GPU 0），依次 +1 | Flask 服务端口 |
+
+### 推理参数（硬编码于 flask_server.py）
+
+| 参数 | 值 |
+|------|----|
+| `unnorm_key` | `calvin_abc2d_oe` |
+| `cfg_scale` | `1.5` |
+| `use_ddim` | `True` |
+| `num_ddim_steps` | `10` |
+
+### 与 Exp-010 的差异
+
+| 项目 | Exp-010 | Exp-012 |
+|------|---------|---------|
+| 日志目录 | `calvin_abc2d_oe_h10_8b` | `calvin_abc2d_oe_h10_layerwise` |
+| checkpoint | step-025116-epoch-03-loss=0.0413 | step-016744-epoch-02-loss=0.0585 |
+| 训练步数 | 25116 | 16744 |
+| epoch | 3 | 2 |
+| loss | 0.0413 | 0.0585 |
+| 架构 | 8B 标准 | layerwise |
+
+### 实验结果
+
+**Average successful sequence length:** 3.526
+
+**Success rates for i instructions in a row:**
+
+| 连续指令数 i | Success Rate |
+|--------------|--------------|
+| 1 | 90.3% |
+| 2 | 79.2% |
+| 3 | 69.3% |
+| 4 | 61.1% |
+| 5 | 52.7% |
+
+**Per-task success rates:**
+
+| 任务 | 成功 / 总数 | Success Rate |
+|------|-------------|--------------|
+| `rotate_blue_block_right` | 69 / 72 | 95.8% |
+| `move_slider_right` | 257 / 257 | 100.0% |
+| `lift_red_block_slider` | 111 / 120 | 92.5% |
+| `place_in_slider` | 239 / 323 | 74.0% |
+| `turn_off_lightbulb` | 126 / 128 | 98.4% |
+| `turn_off_led` | 149 / 151 | 98.7% |
+| `lift_pink_block_slider` | 114 / 124 | 91.9% |
+| `open_drawer` | 311 / 311 | 100.0% |
+| `rotate_red_block_right` | 68 / 73 | 93.2% |
+| `lift_red_block_table` | 148 / 148 | 100.0% |
+| `lift_pink_block_table` | 144 / 150 | 96.0% |
+| `turn_on_lightbulb` | 158 / 158 | 100.0% |
+| `rotate_blue_block_left` | 62 / 62 | 100.0% |
+| `turn_on_led` | 156 / 159 | 98.1% |
+| `push_red_block_left` | 47 / 75 | 62.7% |
+| `lift_blue_block_table` | 147 / 148 | 99.3% |
+| `place_in_drawer` | 153 / 155 | 98.7% |
+| `move_slider_left` | 206 / 215 | 95.8% |
+| `rotate_red_block_left` | 61 / 61 | 100.0% |
+| `close_drawer` | 180 / 180 | 100.0% |
+| `stack_block` | 95 / 167 | 56.9% |
+| `lift_pink_block_drawer` | 12 / 12 | 100.0% |
+| `rotate_pink_block_right` | 61 / 69 | 88.4% |
+| `lift_blue_block_slider` | 108 / 121 | 89.3% |
+| `unstack_block` | 32 / 32 | 100.0% |
+| `push_red_block_right` | 21 / 71 | 29.6% |
+| `push_into_drawer` | 84 / 102 | 82.4% |
+| `rotate_pink_block_left` | 50 / 54 | 92.6% |
+| `push_pink_block_left` | 46 / 73 | 63.0% |
+| `push_blue_block_left` | 43 / 67 | 64.2% |
+| `push_pink_block_right` | 23 / 61 | 37.7% |
+| `lift_red_block_drawer` | 13 / 13 | 100.0% |
+| `lift_blue_block_drawer` | 16 / 16 | 100.0% |
+| `push_blue_block_right` | 16 / 71 | 22.5% |
+
+---
+
+## Exp-013
+
+**日期：** 2026-04-28
+
+### serve.sh 配置
+
+```bash
+CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
+# 每张 GPU 启动一个 flask server，端口从 9002 依次递增
+# GPU 0 → port 9002, GPU 1 → port 9003, ..., GPU 7 → port 9009
+```
+
+### flask_server.py 参数
+
+| 参数 | 值 | 说明 |
+|------|----|------|
+| `--model-path` | `/zhaowei/workspace/CogACT/logs/calvin_abc2d_oe_h10_layerwise/checkpoints/step-025116-epoch-03-loss=0.0451.pt` | 模型 checkpoint 路径（layerwise 架构，epoch-03） |
+| `--unnorm-key` | `calvin_abc2d_oe` | 动作归一化统计键 |
+| `--future-action-window-size` | `9` | 预测未来动作窗口大小（输出 10 步，index 0~9） |
+| `--port` | `9002`（GPU 0），依次 +1 | Flask 服务端口 |
+
+### 推理参数（硬编码于 flask_server.py）
+
+| 参数 | 值 |
+|------|----|
+| `unnorm_key` | `calvin_abc2d_oe` |
+| `cfg_scale` | `1.5` |
+| `use_ddim` | `True` |
+| `num_ddim_steps` | `10` |
+
+### 与 Exp-012 的差异
+
+| 项目 | Exp-012 | Exp-013 |
+|------|---------|---------|
+| checkpoint | step-016744-epoch-02-loss=0.0585 | step-025116-epoch-03-loss=0.0451 |
+| 训练步数 | 16744 | 25116 |
+| epoch | 2 | 3 |
+| loss | 0.0585 | 0.0451 |
+
+### 实验结果
+
+**Average successful sequence length:** 3.68
+
+**Success rates for i instructions in a row:**
+
+| 连续指令数 i | Success Rate |
+|--------------|--------------|
+| 1 | 91.1% |
+| 2 | 81.7% |
+| 3 | 73.0% |
+| 4 | 64.9% |
+| 5 | 57.3% |
+
+**Per-task success rates:**
+
+| 任务 | 成功 / 总数 | Success Rate |
+|------|-------------|--------------|
+| `rotate_blue_block_right` | 72 / 75 | 96.0% |
+| `move_slider_right` | 260 / 261 | 99.6% |
+| `lift_red_block_slider` | 115 / 121 | 95.0% |
+| `place_in_slider` | 266 / 337 | 78.9% |
+| `turn_off_lightbulb` | 131 / 132 | 99.2% |
+| `turn_off_led` | 147 / 148 | 99.3% |
+| `push_into_drawer` | 91 / 109 | 83.5% |
+| `lift_blue_block_drawer` | 20 / 20 | 100.0% |
+| `close_drawer` | 185 / 186 | 99.5% |
+| `lift_pink_block_slider` | 114 / 123 | 92.7% |
+| `open_drawer` | 322 / 322 | 100.0% |
+| `rotate_red_block_right` | 69 / 74 | 93.2% |
+| `lift_red_block_table` | 156 / 159 | 98.1% |
+| `lift_pink_block_table` | 162 / 166 | 97.6% |
+| `turn_on_lightbulb` | 158 / 159 | 99.4% |
+| `rotate_blue_block_left` | 65 / 65 | 100.0% |
+| `turn_on_led` | 163 / 164 | 99.4% |
+| `push_pink_block_right` | 25 / 61 | 41.0% |
+| `push_red_block_left` | 49 / 74 | 66.2% |
+| `lift_blue_block_table` | 151 / 152 | 99.3% |
+| `place_in_drawer` | 160 / 161 | 99.4% |
+| `move_slider_left` | 210 / 226 | 92.9% |
+| `rotate_red_block_left` | 62 / 62 | 100.0% |
+| `stack_block` | 99 / 165 | 60.0% |
+| `lift_pink_block_drawer` | 10 / 11 | 90.9% |
+| `rotate_pink_block_right` | 60 / 67 | 89.6% |
+| `lift_blue_block_slider` | 103 / 114 | 90.4% |
+| `unstack_block` | 38 / 39 | 97.4% |
+| `push_red_block_right` | 32 / 71 | 45.1% |
+| `rotate_pink_block_left` | 52 / 55 | 94.5% |
+| `push_pink_block_left` | 51 / 74 | 68.9% |
+| `push_blue_block_left` | 43 / 66 | 65.2% |
+| `lift_red_block_drawer` | 15 / 16 | 93.8% |
+| `push_blue_block_right` | 24 / 72 | 33.3% |
 
 <!-- 新增实验请复制下方模板 -->
 
