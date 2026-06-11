@@ -153,6 +153,11 @@ class RLDSBatchTransformOe(RLDSBatchTransform):
 
     def get_oe_lang(self, rlds_batch):
         """Get the unified language instructions for oe-vla models."""
+        if not rlds_batch["mm_task"]:
+            raise ValueError(
+                "mm_task is empty! OE-prompt datasets require mm_task to contain "
+                "mm_instruction and mm_utils; make sure load_oe_prompt=True is set."
+            )
         mm_instruction = rlds_batch["mm_task"]["mm_instruction"].decode().lower()
         mm_utils = rlds_batch["mm_task"]["mm_utils"]
         mm_utils = self.decode_utils(mm_utils)
@@ -244,8 +249,26 @@ class RLDSBatchTransformOeQwenVL3(RLDSBatchTransformOe):
         # QwenVL3 consider all the images same, no need to add special token for utils
         # This should not be removed even do nothing to rewrite the function
         pass
-    
-    def oelang_to_qwen_input(self, obs_imgs, oe_lang, mm_utils, action):
+
+    def process_latent_action(self, latent_action):
+        """Convert latent_action (3, 16, 2) array into a formatted string.
+
+        Coordinates are normalized to Qwen3's 1000×1000 grounding space
+        (divide by image size 200, then multiply by 1000).
+
+        Format: [(x1,y1) (x2,y2) ... (x16,y16)];[(...)];[(...)]
+        () wraps a coordinate pair, [] wraps one timestep, ; separates timesteps.
+        """
+        arr = np.array(latent_action, dtype=np.float32)
+        arr = arr / 200.0 * 1000.0
+        arr = np.round(arr)
+        timesteps = []
+        for t in range(arr.shape[0]):
+            points = " ".join(f"({int(p[0])},{int(p[1])})" for p in arr[t])
+            timesteps.append(f"[{points}]")
+        return ";".join(timesteps)
+
+    def oelang_to_qwen_input(self, obs_imgs, oe_lang, mm_utils, action, latent_action=None):
         # Replace <oe> tokens with actual image references in the content list
         view_nums = len(obs_imgs)
         oe_placeholders = "<oe>" * view_nums
@@ -260,17 +283,19 @@ class RLDSBatchTransformOeQwenVL3(RLDSBatchTransformOe):
             if i < len(parts) - 1:
                 content.append({"type": "image", "image": mm_utils[i]})
 
-        if self.action_tokenizer is None:
-            messages = [
-                {"role": "user", "content": content},
-                {"role": "assistant", "content": ""},
-            ]
-        else:
-            # Construct Chat-based Prompt =>> Input is default query + language instruction, output are the action tokens
-            messages = [
-                {"role": "user", "content": content},
-                {"role": "assistant", "content": self.action_tokenizer(action)},
-            ]
+        # Build assistant text: latent_action (if present) + action tokens
+        assistant_text = ""
+        if latent_action is not None:
+            assistant_text += latent_action
+        if self.action_tokenizer is not None:
+            assistant_text += self.action_tokenizer(action)
+
+        assistant_content = [{"type": "text", "text": assistant_text}] if assistant_text else []
+
+        messages = [
+            {"role": "user", "content": content},
+            {"role": "assistant", "content": assistant_content},
+        ]
 
         inputs = self.prompt_builder_fn(
             messages,
@@ -279,7 +304,20 @@ class RLDSBatchTransformOeQwenVL3(RLDSBatchTransformOe):
             return_dict=True,
             return_tensors="pt"
         )
-        return inputs
+
+        # Count assistant tokens for label masking, assistant_token_count is taken as a flag
+        if assistant_text:
+            assistant_inputs = self.prompt_builder_fn(
+                [{"role": "assistant", "content": assistant_content}],
+                tokenize=True,
+                add_generation_prompt=False,
+                return_dict=True,
+            )
+            assistant_token_count = len(assistant_inputs["input_ids"][0])
+        else:
+            assistant_token_count = 0
+
+        return inputs, assistant_token_count
 
 
     def __call__(self, rlds_batch):
@@ -302,10 +340,17 @@ class RLDSBatchTransformOeQwenVL3(RLDSBatchTransformOe):
 
         oe_lang, mm_utils = self.get_oe_lang(rlds_batch)
 
+        # Extract and process latent action
+        latent_action_raw = rlds_batch["mm_task"].get("latent_action", None)
+        latent_action = None
+        if latent_action_raw is not None:
+            latent_action = self.process_latent_action(latent_action_raw)
+            latent_action_raw = np.array(latent_action_raw, dtype=np.float32)
+
         # Tokenize using QwenVL3's processor
         # For single arm setting (default use the right arm), the left image and right image are the same
         obs_imgs = [img_scene, img_left]
-        qwen_input = self.oelang_to_qwen_input(obs_imgs, oe_lang, mm_utils, action)
+        qwen_input, assistant_token_count = self.oelang_to_qwen_input(obs_imgs, oe_lang, mm_utils, action, latent_action)
         input_ids = qwen_input["input_ids"]                                                 # shape: [1, seq_len]
         labels = input_ids.detach().clone()                                                 # shape: [1, seq_len]
         pixel_values = qwen_input["pixel_values"]
@@ -318,18 +363,29 @@ class RLDSBatchTransformOeQwenVL3(RLDSBatchTransformOe):
             if "action_mask" in rlds_batch:
                 action_mask = torch.tensor(rlds_batch["action_mask"], dtype=torch.bool)
 
-        if self.action_tokenizer is None:
+        if assistant_token_count == 0:
+            # a. this branch covers the old behavior to define the labels
             labels[0, :-1] = IGNORE_INDEX
+            if not self.predict_stop_token:
+                labels[0, -1] = IGNORE_INDEX
         else:
-            # [CRITICAL] We do not want to take the loss for anything but the predicted action tokens!
-            labels[0, : -(len(action) + 1)] = IGNORE_INDEX
-
-        if not self.predict_stop_token:
-            labels[0, -1] = IGNORE_INDEX
+            # b. this branch is for the new behavior where the latent action tokens are included
+            labels[0, :-assistant_token_count] = IGNORE_INDEX
 
         state = rlds_batch["observation"]["proprio"]
         state = torch.tensor(state, dtype=torch.float32)
-        return dict(input_ids=input_ids, labels=labels, pixel_values=pixel_values, image_grid_thw=image_grid_thw, dataset_name=dataset_name, actions=action, action_masks=action_mask, state=state)
+        return dict(
+            input_ids=input_ids,
+            labels=labels,
+            pixel_values=pixel_values,
+            image_grid_thw=image_grid_thw,
+            dataset_name=dataset_name,
+            actions=action,
+            action_masks=action_mask,
+            state=state,
+            debug_img=img_scene,
+            debug_latent_action=latent_action_raw,
+        )
 
 
 class RLDSDataset(IterableDataset):

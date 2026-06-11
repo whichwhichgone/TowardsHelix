@@ -340,4 +340,8 @@ class PaddedCollatorOeQwenVL3(PaddedCollatorOe):
         )
         if dataset_names is not None:
             output["dataset_names"] = dataset_names
+        if "debug_img" in instances[0]:
+            output["debug_imgs"] = [instance["debug_img"] for instance in instances]
+        if "debug_latent_action" in instances[0]:
+            output["debug_latent_actions"] = [instance["debug_latent_action"] for instance in instances]
         return output

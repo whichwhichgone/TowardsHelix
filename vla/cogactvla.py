@@ -54,6 +54,7 @@ class CogACT(nn.Module):
         use_ema: bool = False,
         norm_stats: Dict[str, Dict[str, Dict[str, Dict[str, List[float]]]]] = None,
         e2e_vlm: bool = False,
+        lm_loss_weight: float = 1.0,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -85,6 +86,7 @@ class CogACT(nn.Module):
         # Diffusion head is always trainable
         self._trainable_module_keys = ['action_model', 'state_proj', 'hidden_proj']
         self.norm_stats = norm_stats
+        self.lm_loss_weight = lm_loss_weight
         self.use_cfm = True
 
     @property
@@ -174,8 +176,15 @@ class CogACT(nn.Module):
         vlm_kwargs["output_hidden_states"] = True
         output: CausalLMOutputWithPast = self.vlm(**vlm_kwargs)
 
-        # extract the last DiT-depth hidden states and their corresponding attention masks
-        fused_attention_mask = ~output["fused_attention_mask"]
+        # Extract the last DiT-depth hidden states and their corresponding attention masks.
+        # Keep only the leading prompt/prefix tokens available to DiT cross-attention.
+        fused_attention_mask = ~output["fused_attention_mask"].bool()
+        leading_ignore = labels.eq(IGNORE_INDEX).long().cumprod(dim=1).bool()
+        assert leading_ignore.shape[1] == fused_attention_mask.shape[1], (
+            "Expected labels and fused_attention_mask to have the same sequence length, "
+            f"but got labels length {leading_ignore.shape[1]} and fused_attention_mask length {fused_attention_mask.shape[1]}."
+        )
+        fused_attention_mask = fused_attention_mask | ~leading_ignore
 
         # extract the cognition feature
         state_features = self.state_proj(state)                                                 # [B, 1, D]
@@ -191,10 +200,15 @@ class CogACT(nn.Module):
 
         # Action model forward and compute loss
         if self.use_cfm:
-            loss = self.action_model.cfm_loss(actions_repeated, state_features_repeated, context=hidden_features_repeated, context_mask=hidden_mask_repeated)
+            action_loss = self.action_model.cfm_loss(actions_repeated, state_features_repeated, context=hidden_features_repeated, context_mask=hidden_mask_repeated)
         else:
-            loss = self.action_model.loss(actions_repeated, state_features_repeated, context=hidden_features_repeated, context_mask=hidden_mask_repeated)
-        return loss, output
+            action_loss = self.action_model.loss(actions_repeated, state_features_repeated, context=hidden_features_repeated, context_mask=hidden_mask_repeated)
+
+        loss = action_loss
+        has_lm_targets = labels.ne(IGNORE_INDEX).any()
+        if self.lm_loss_weight > 0 and output.loss is not None and has_lm_targets:
+            loss = loss + self.lm_loss_weight * output.loss
+        return loss, output, action_loss
 
     def get_fsdp_wrapping_policy(self) -> Callable:
         """Return an FSDP _or_policy over the policies returned by each individual backbone (and our VLM policy)."""
@@ -253,6 +267,7 @@ class CogACT(nn.Module):
         action_model_type: str = 'DiT-B',
         use_ema: bool = False,
         norm_stats = None,
+        lm_loss_weight: float = 1.0,
         **kwargs,
     ) -> CogACT:
 
@@ -297,6 +312,7 @@ class CogACT(nn.Module):
                         action_model_type = action_model_type,
                         use_ema = use_ema,
                         norm_stats = norm_stats,
+                        lm_loss_weight = lm_loss_weight,
                         )
         # Load State projector from Checkpoint
         if "state_proj" in model_state_dict:
@@ -345,6 +361,7 @@ class CogACT(nn.Module):
         action_model_type: str = 'DiT-B',
         use_ema: bool = False,
         norm_stats = None,
+        lm_loss_weight: float = 1.0,
         **kwargs,
     ) -> "CogACT":
         """
@@ -392,6 +409,7 @@ class CogACT(nn.Module):
             use_ema=use_ema,
             norm_stats=norm_stats,
             e2e_vlm=True,
+            lm_loss_weight=lm_loss_weight,
         )
 
         # Load action model and projector weights from checkpoint
@@ -480,12 +498,11 @@ class CogACT(nn.Module):
                     content.append({"type": "image", "image": mm_utils[i]})
 
             # Construct the messages for the model
-            messages = [
-                {"role": "user", "content": content},
-                {"role": "assistant", "content": ""},
-            ]
+            messages = [{"role": "user", "content": content}]
 
-            # Prepare inputs
+            # Prepare inputs, 
+            # Set add_generation_prompt to 'True' for old behavior without latent action.
+            # Set add_generation_prompt to 'False' for new behavior with latent action.
             inputs = prompt_builder_fn(
                 messages, tokenize=True, add_generation_prompt=False,
                 return_dict=True, return_tensors="pt"

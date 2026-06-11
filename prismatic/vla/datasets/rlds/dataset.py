@@ -50,6 +50,7 @@ def make_dataset_from_rlds(
     mm_task_key: Optional[str] = None,
     mm_prompt_key: Optional[str] = None,
     mm_utils_key: Optional[str] = None,
+    latent_action_key: Optional[str] = None,
     action_proprio_normalization_type: NormalizationType = NormalizationType.NORMAL,
     dataset_statistics: Optional[Union[dict, str]] = None,
     absolute_action_mask: Optional[List[bool]] = None,
@@ -193,6 +194,8 @@ def make_dataset_from_rlds(
             mm_task["task_type"] = traj.pop(mm_task_key)
             mm_task["mm_instruction"] = traj.pop(mm_prompt_key)
             mm_task["mm_utils"] = traj.pop(mm_utils_key)
+            if latent_action_key is not None:
+                mm_task["latent_action"] = traj.pop(latent_action_key)
 
         traj = {
             "observation": new_obs,

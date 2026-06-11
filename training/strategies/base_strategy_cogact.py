@@ -11,6 +11,7 @@ import torch
 import torchvision.transforms.functional as TF
 import torch.distributed as dist
 import numpy as np  
+import wandb
 
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -18,7 +19,7 @@ from typing import Callable, Optional, Union
 from tqdm import tqdm
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from collections import OrderedDict
-from PIL import Image  
+from PIL import Image, ImageDraw  
 from torch.utils.data import DataLoader, Dataset, DistributedSampler, IterableDataset
 
 from prismatic.models.vlms import PrismaticVLM
@@ -30,6 +31,55 @@ from prismatic.util.data_utils import PaddedCollator, PaddedCollatorForLanguageM
 
 from vla import CogACT
   
+
+def _draw_latent_action_overlay(img: Image.Image, latent_action) -> Optional[Image.Image]:
+    if img is None or latent_action is None:
+        return None
+
+    overlay = img.copy().convert("RGB")
+    draw = ImageDraw.Draw(overlay)
+    points = np.asarray(latent_action, dtype=np.float32)
+    if points.size == 0:
+        return None
+
+    if points.ndim == 2:
+        points = points[None, ...]
+    points = points.reshape(points.shape[0], -1, 2)
+    colors = ["red", "lime", "cyan", "yellow", "magenta", "orange"]
+
+    for timestep, timestep_points in enumerate(points):
+        color = colors[timestep % len(colors)]
+        for x, y in timestep_points:
+            x = int(round(float(x) / 200.0 * overlay.width))
+            y = int(round(float(y) / 200.0 * overlay.height))
+            x = max(0, min(overlay.width - 1, x))
+            y = max(0, min(overlay.height - 1, y))
+            radius = 3
+            draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=color, outline="white")
+
+    return overlay
+
+
+def _has_wandb_tracker(metrics: VLAMetrics) -> bool:
+    return any(tracker.__class__.__name__ == "WeightsBiasesTracker" for tracker in getattr(metrics, "trackers", []))
+
+
+def _log_latent_action_overlay(batch, metrics: VLAMetrics, global_step: int) -> None:
+    if not overwatch.is_rank_zero() or not _has_wandb_tracker(metrics):
+        return
+
+    debug_imgs = batch.get("debug_imgs")
+    debug_latent_actions = batch.get("debug_latent_actions")
+    if not debug_imgs or not debug_latent_actions:
+        return
+
+    overlay = _draw_latent_action_overlay(debug_imgs[0], debug_latent_actions[0])
+    if overlay is None:
+        return
+
+    wandb.log({"VLA Train/Latent Action Overlay": wandb.Image(overlay)}, step=global_step)
+
+
 @torch.no_grad()
 def update_ema(ema_model, model, decay=0.9999):
     """
@@ -257,6 +307,7 @@ class TrainingStrategy(ABC):
         save_interval: int = 2500,
         save_full_model: bool = True,
         action_model: bool = True,
+        latent_action_viz_interval: int = 100,
     ) -> None:
         """Run the VLA training loop for the given `dataset` and `collator`; log losses, action metrics to `metrics`."""
         assert isinstance(vla_dataset, IterableDataset), "VLA training expects an IterableDataset!"
@@ -302,7 +353,7 @@ class TrainingStrategy(ABC):
                     "cuda", dtype=self.mixed_precision_dtype, enabled=self.enable_mixed_precision_training
                 ):
                     if action_model:
-                        loss, output = self.vlm(
+                        loss, output, action_loss = self.vlm(
                             input_ids=batch["input_ids"],
                             attention_mask=batch["attention_mask"],
                             actions=batch["actions"],
@@ -324,9 +375,15 @@ class TrainingStrategy(ABC):
                             labels=batch["labels"],
                         )
                         loss = output.loss
+                        action_loss = None
 
                 # Commit Loss =>> Backward!
-                metrics.commit(loss=loss)
+                metric_kwargs = {"loss": loss}
+                if action_loss is not None:
+                    metric_kwargs["action_loss"] = action_loss
+                if output.loss is not None:
+                    metric_kwargs["lm_loss"] = output.loss
+                metrics.commit(**metric_kwargs)
                 
                 normalized_loss = loss / self.grad_accumulation_steps
                 normalized_loss.backward()
@@ -350,6 +407,8 @@ class TrainingStrategy(ABC):
                     # Push Metrics
                     metrics.commit(update_step_time=True, global_step=metrics.global_step + 1, epoch=epoch, lr=self.lr_scheduler.get_last_lr()[0])
                     status = metrics.push()
+                    if latent_action_viz_interval > 0 and metrics.global_step % latent_action_viz_interval == 0:
+                        _log_latent_action_overlay(batch, metrics, metrics.global_step)
 
                     # Check for Save Interval or Max Steps & Save Checkpoint
                     if self.max_steps is not None:

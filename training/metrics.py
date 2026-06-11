@@ -244,6 +244,8 @@ class VLAMetrics:
         self.state = {
             "loss_raw": deque(maxlen=grad_accumulation_steps),
             "loss": deque(maxlen=window_size),
+            "action_loss": deque(maxlen=window_size),
+            "lm_loss": deque(maxlen=window_size),
             "step_time": deque(maxlen=window_size),
             "lr": [],
         }
@@ -308,23 +310,35 @@ class VLAMetrics:
         # Note :: Raw Loss is an Average over Gradient Accumulation Steps --> No Smoothing!
         loss_raw = torch.stack(list(self.state["loss_raw"])).mean().item()
         loss = torch.stack(list(self.state["loss"])).mean().item()
+        action_loss = (
+            torch.stack(list(self.state["action_loss"])).mean().item()
+            if len(self.state["action_loss"]) > 0
+            else None
+        )
+        lm_loss = (
+            torch.stack(list(self.state["lm_loss"])).mean().item()
+            if len(self.state["lm_loss"]) > 0
+            else None
+        )
         step_time, lr = np.mean(list(self.state["step_time"])), self.state["lr"][-1]
         status = self.get_status(loss)
 
 
         # Fire to Trackers
         prefix = "VLA Train"
-        self.log(
-            self.global_step,
-            metrics={
-                f"{prefix}/Step": self.global_step,
-                f"{prefix}/Epoch": self.epoch,
-                f"{prefix}/Loss": loss,
-                f"{prefix}/Loss (Raw)": loss_raw,
-                f"{prefix}/Learning Rate": lr,
-                f"{prefix}/Step Time": step_time,
-            },
-        )
+        metrics = {
+            f"{prefix}/Step": self.global_step,
+            f"{prefix}/Epoch": self.epoch,
+            f"{prefix}/Loss": loss,
+            f"{prefix}/Loss (Raw)": loss_raw,
+            f"{prefix}/Learning Rate": lr,
+            f"{prefix}/Step Time": step_time,
+        }
+        if action_loss is not None:
+            metrics[f"{prefix}/Action Loss"] = action_loss
+        if lm_loss is not None:
+            metrics[f"{prefix}/LM Loss"] = lm_loss
+        self.log(self.global_step, metrics=metrics)
         return status
 
     def finalize(self) -> str:

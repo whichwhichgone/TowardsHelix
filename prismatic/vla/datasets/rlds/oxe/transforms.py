@@ -911,6 +911,7 @@ OXE_STANDARDIZATION_TRANSFORMS = {
     "example_dataset": identity_transform,
     "calvin_abc2d_oe": identity_transform,
     "calvin_abc2d_oe_baseline": identity_transform,
+    "calvin_abc2d_oe_latact": identity_transform,
     "piper_oe": identity_transform,
     "piper_arrange": identity_transform,
     "piper_oe_nolang": identity_transform,

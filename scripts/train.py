@@ -87,11 +87,13 @@ class TrainConfig:
     #trackers: Tuple[str, ...] = ("jsonl",)                         # Trackers to initialize (if W&B, add config!)
     wandb_project: str = ""                                         # Name of W&B project to log to (use default!)
     wandb_entity: str = ""                                          # Name of entity to log under
+    latent_action_viz_interval: int = 100                            # Interval for logging latent action overlays to W&B (0 disables)
     repeated_diffusion_steps: int = 8                               # Repeated steps for training action model (a diffusion model)
     load_all_data_for_training: bool = True                         # Load all training data 
     future_action_window_size: int = 15                             # Action chunking, predicting future actions + current action
     past_action_window_size: int = 0                                # Action history window size, not used now, set to be 0 
     action_model_type: str = 'DiT-B'                                # Action model type, chose from ['DiT-S', 'DiT-B', 'DiT-L']
+    lm_loss_weight: float = 1.0                                     # Weight for language-model CE loss on unmasked labels
     use_ema: bool = False                                           # EMA version of action model
     action_dim: int = 7                                             # Dimension of action space
 
@@ -174,6 +176,7 @@ def train(cfg: TrainConfig) -> None:
                         future_action_window_size=cfg.future_action_window_size,
                         past_action_window_size=cfg.past_action_window_size,
                         use_ema=cfg.use_ema,
+                        lm_loss_weight=cfg.lm_loss_weight,
                         )
 
     else:
@@ -193,6 +196,7 @@ def train(cfg: TrainConfig) -> None:
             past_action_window_size=cfg.past_action_window_size,
             use_ema=cfg.use_ema,
             e2e_vlm=is_e2e_vlm,
+            lm_loss_weight=cfg.lm_loss_weight,
         )
         # del this variable to avoid bugs. The vlm shouldn't be used anymore
         del vlm
@@ -323,6 +327,7 @@ def train(cfg: TrainConfig) -> None:
         metrics,
         save_interval=cfg.save_interval,
         action_model=True,
+        latent_action_viz_interval=cfg.latent_action_viz_interval,
     )
 
     # Finalize
