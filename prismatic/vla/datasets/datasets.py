@@ -305,17 +305,14 @@ class RLDSBatchTransformOeQwenVL3(RLDSBatchTransformOe):
             return_tensors="pt"
         )
 
-        # Count assistant tokens for label masking, assistant_token_count is taken as a flag
-        if assistant_text:
-            assistant_inputs = self.prompt_builder_fn(
-                [{"role": "assistant", "content": assistant_content}],
-                tokenize=True,
-                add_generation_prompt=False,
-                return_dict=True,
-            )
-            assistant_token_count = len(assistant_inputs["input_ids"][0])
-        else:
-            assistant_token_count = 0
+        # Count assistant tokens for label masking
+        assistant_inputs = self.prompt_builder_fn(
+            [{"role": "assistant", "content": assistant_content}],
+            tokenize=True,
+            add_generation_prompt=False,
+            return_dict=True,
+        )
+        assistant_token_count = len(assistant_inputs["input_ids"][0])
 
         return inputs, assistant_token_count
 
@@ -363,14 +360,7 @@ class RLDSBatchTransformOeQwenVL3(RLDSBatchTransformOe):
             if "action_mask" in rlds_batch:
                 action_mask = torch.tensor(rlds_batch["action_mask"], dtype=torch.bool)
 
-        if assistant_token_count == 0:
-            # a. this branch covers the old behavior to define the labels
-            labels[0, :-1] = IGNORE_INDEX
-            if not self.predict_stop_token:
-                labels[0, -1] = IGNORE_INDEX
-        else:
-            # b. this branch is for the new behavior where the latent action tokens are included
-            labels[0, :-assistant_token_count] = IGNORE_INDEX
+        labels[0, :-assistant_token_count] = IGNORE_INDEX
 
         state = rlds_batch["observation"]["proprio"]
         state = torch.tensor(state, dtype=torch.float32)

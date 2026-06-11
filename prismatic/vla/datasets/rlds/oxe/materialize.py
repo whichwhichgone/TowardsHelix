@@ -74,7 +74,7 @@ def make_oxe_dataset_kwargs(
         dataset_kwargs["mm_task_key"] = "task_type"
         dataset_kwargs["mm_prompt_key"] = "mm_instruction"
         dataset_kwargs["mm_utils_key"] = "mm_utils"
-        dataset_kwargs["latent_action_key"] = "latent_action"
+        dataset_kwargs["latent_action_key"] = None
 
     # Specify Standardization Transform
     dataset_kwargs["standardize_fn"] = OXE_STANDARDIZATION_TRANSFORMS[dataset_name]

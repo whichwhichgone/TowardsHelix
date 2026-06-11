@@ -11,7 +11,7 @@ export WANDB_API_KEY=83793606f810aa3d385ea5d12dbd352514ac54e1
     --nproc-per-node 8 \
     "${PWD}/scripts/train.py" \
     --vla.type "qwen3-vl-8b+oxe+diffusion" \
-    --vla.data_mix "calvin_abc2d_oe_latact" \
+    --vla.data_mix "calvin_abc2d_oe" \
     --vla.expected_world_size 8 \
     --vla.global_batch_size 128 \
     --vla.per_device_batch_size 16 \
@@ -20,7 +20,7 @@ export WANDB_API_KEY=83793606f810aa3d385ea5d12dbd352514ac54e1
     --vla.epochs 3 \
     --data_root_dir "/zhaowei/data/flex_vla_data" \
     --run_root_dir "./logs" \
-    --run_id "calvin_abc2d_oe_h10_8b_layerwise_flow_latact" \
+    --run_id "calvin_abc2d_oe_h10_8b_layerwise_flow_statedrop0.8" \
     --image_aug "False" \
     --wandb_project "nips2026_flex" \
     --wandb_entity "yijiulanpishu" \
@@ -28,7 +28,4 @@ export WANDB_API_KEY=83793606f810aa3d385ea5d12dbd352514ac54e1
     --repeated_diffusion_steps 8 \
     --future_action_window_size 9 \
     --action_model_type "DiT-B" \
-    --is_resume "true" \
-    --pretrained_checkpoint "/zhaowei/workspace/CogACT/logs/calvin_abc2d_oe_h10_8b_layerwise_flow_latact/checkpoints/step-020000-epoch-02-loss=0.2865.pt" \
-    --resume_step 20000 \
-    --resume_epoch 2 \
+    --is_resume "false" \

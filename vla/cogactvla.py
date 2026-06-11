@@ -67,7 +67,10 @@ class CogACT(nn.Module):
             future_action_window_size = future_action_window_size, 
             past_action_window_size = past_action_window_size
             )
-        self.state_proj = nn.Linear(15, token_size, bias=False)
+        self.state_proj = nn.Sequential(
+            nn.Linear(15, token_size, bias=False),
+            nn.Dropout(p=0.8),
+        )
         hidden_size = vlm.vlm_backbone.embed_dim if e2e_vlm else vlm.llm_backbone.embed_dim
         self.hidden_proj = nn.Linear(hidden_size, self.action_model.net.hidden_size, bias=False)
         self.vlm = vlm
@@ -500,8 +503,7 @@ class CogACT(nn.Module):
             # Construct the messages for the model
             messages = [{"role": "user", "content": content}]
 
-            # Prepare inputs, 
-            # Set add_generation_prompt to 'True' for old behavior without latent action.
+            # Prepare inputs
             # Set add_generation_prompt to 'False' for new behavior with latent action.
             inputs = prompt_builder_fn(
                 messages, tokenize=True, add_generation_prompt=False,
