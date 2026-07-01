@@ -7,10 +7,11 @@ functions, and initialization logic.
 Training Strategies (DDP, FSDP-Grad, FSDP-Full) tend to have a lot of repeated components; this class does a lot of
 heavy lifting.
 """
-import torch  
+import re
+import torch
 import torchvision.transforms.functional as TF
 import torch.distributed as dist
-import numpy as np  
+import numpy as np
 import wandb
 
 from abc import ABC, abstractmethod
@@ -27,7 +28,7 @@ from prismatic.overwatch import initialize_overwatch
 from prismatic.training.metrics import Metrics, VLAMetrics
 from prismatic.util import check_bloat16_supported
 from prismatic.util.batching_utils import SplitModalitySampler
-from prismatic.util.data_utils import PaddedCollator, PaddedCollatorForLanguageModeling
+from prismatic.util.data_utils import PaddedCollator, PaddedCollatorForLanguageModeling, IGNORE_INDEX
 
 from vla import CogACT
   
@@ -78,6 +79,101 @@ def _log_latent_action_overlay(batch, metrics: VLAMetrics, global_step: int) -> 
         return
 
     wandb.log({"VLA Train/Latent Action Overlay": wandb.Image(overlay)}, step=global_step)
+
+
+def _parse_latent_action_text(text: Optional[str]) -> Optional[np.ndarray]:
+    """Invert process_latent_action: parse a string like
+
+        [(x1,y1) (x2,y2) ...];[(...)];[(...)]
+
+    back into a (T, N, 2) array of points in the 200x200 space expected by
+    _draw_latent_action_overlay. Coordinates in the text live in Qwen's 1000x1000
+    grounding space, so we divide by 5 (1000 -> 200). Robust to partial / garbled
+    decodes: returns None if nothing parses, and skips timesteps whose point count
+    does not match the modal count rather than crashing on ragged rows.
+    """
+    if not text:
+        return None
+
+    coord_re = re.compile(r"\((\d+(?:\.\d+)?),(\d+(?:\.\d+)?)\)")
+    timesteps = []
+    for seg in text.split(";"):
+        pairs = coord_re.findall(seg)
+        if not pairs:
+            continue
+        timesteps.append([(float(x), float(y)) for x, y in pairs])
+
+    if not timesteps:
+        return None
+
+    # Keep only timesteps that share the modal point count so np.array is rectangular.
+    counts = [len(t) for t in timesteps]
+    modal = max(set(counts), key=counts.count)
+    timesteps = [t for t in timesteps if len(t) == modal]
+    if not timesteps:
+        return None
+
+    points = np.array(timesteps, dtype=np.float32)  # (T, N, 2) in 1000-space
+    points = points / 5.0                           # -> 200-space
+    return points
+
+
+def _decode_predicted_assistant_text(output, batch, tokenizer, sample_idx: int = 0) -> Optional[str]:
+    """Teacher-forced argmax decode of the supervised assistant tokens for one sample.
+
+    Logits at position t predict the token at t+1, so we align argmax(logits[:-1])
+    with labels[1:] and keep only the positions that carry LM supervision
+    (labels != IGNORE_INDEX). Returns the decoded text, or None if the sample has no
+    supervised tokens.
+    """
+    logits = getattr(output, "logits", None)
+    if logits is None:
+        return None
+
+    labels = batch.get("labels")
+    if labels is None:
+        return None
+
+    pred_ids = logits[sample_idx, :-1].argmax(dim=-1)          # [seq_len-1]
+    lbl = labels[sample_idx, 1:].to(pred_ids.device)            # [seq_len-1]
+    mask = lbl != IGNORE_INDEX
+    if not bool(mask.any()):
+        return None
+
+    selected = pred_ids[mask].cpu()
+    return tokenizer.decode(selected, skip_special_tokens=True)
+
+
+def _log_predicted_latent_action_overlay(batch, output, model, metrics: VLAMetrics, global_step: int) -> None:
+    """Overlay the model's *predicted* latent action points on batch[0]'s scene image.
+
+    Mirrors _log_latent_action_overlay but decodes the points from the model's own LM
+    token predictions (teacher-forced argmax) instead of the ground truth. A failure
+    here must never interrupt training, so the body is wrapped in try/except.
+    """
+    if not overwatch.is_rank_zero() or not _has_wandb_tracker(metrics):
+        return
+
+    debug_imgs = batch.get("debug_imgs")
+    if not debug_imgs:
+        return
+
+    try:
+        vlm = getattr(model, "vlm", None)
+        vlm_backbone = getattr(vlm, "vlm_backbone", None)
+        tokenizer = getattr(vlm_backbone, "tokenizer", None)
+        if tokenizer is None:
+            return
+
+        text = _decode_predicted_assistant_text(output, batch, tokenizer)
+        points = _parse_latent_action_text(text)
+        overlay = _draw_latent_action_overlay(debug_imgs[0], points)
+        if overlay is None:
+            return
+
+        wandb.log({"VLA Train/Predicted Latent Action Overlay": wandb.Image(overlay)}, step=global_step)
+    except Exception as e:  # noqa: BLE001 - viz must never crash training
+        overwatch.warning(f"Failed to log predicted latent action overlay: {e}")
 
 
 @torch.no_grad()
@@ -409,6 +505,7 @@ class TrainingStrategy(ABC):
                     status = metrics.push()
                     if latent_action_viz_interval > 0 and metrics.global_step % latent_action_viz_interval == 0:
                         _log_latent_action_overlay(batch, metrics, metrics.global_step)
+                        _log_predicted_latent_action_overlay(batch, output, self.vlm, metrics, metrics.global_step)
 
                     # Check for Save Interval or Max Steps & Save Checkpoint
                     if self.max_steps is not None:

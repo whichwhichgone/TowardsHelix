@@ -11,20 +11,20 @@ export WANDB_API_KEY=83793606f810aa3d385ea5d12dbd352514ac54e1
     --nproc-per-node 8 \
     "${PWD}/scripts/train.py" \
     --vla.type "qwen3-vl-8b+oxe+diffusion" \
-    --vla.data_mix "calvin_abc2d_oe" \
+    --vla.data_mix "calvin_abc2d_oe_latact" \
     --vla.expected_world_size 8 \
     --vla.global_batch_size 128 \
     --vla.per_device_batch_size 16 \
     --vla.learning_rate 1.5e-5 \
     --vla.lr_scheduler_type "linear-warmup+cosine-decay" \
     --vla.epochs 3 \
-    --data_root_dir "/zhaowei/data/flex_vla_data" \
+    --data_root_dir "/zhaowei/data/flex_vla_data/calvin_abc2d_oe_latact_5dots" \
     --run_root_dir "./logs" \
-    --run_id "calvin_abc2d_oe_h10_8b_layerwise_flow_statedrop0.8" \
+    --run_id "calvin_abc2d_oe_h10_8b_layerwise_flow_statedrop0.8_latact_5dots_tail" \
     --image_aug "False" \
     --wandb_project "nips2026_flex" \
     --wandb_entity "yijiulanpishu" \
-    --save_interval 10000 \
+    --save_interval 100000 \
     --repeated_diffusion_steps 8 \
     --future_action_window_size 9 \
     --action_model_type "DiT-B" \
