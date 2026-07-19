@@ -180,14 +180,14 @@ class CogACT(nn.Module):
         output: CausalLMOutputWithPast = self.vlm(**vlm_kwargs)
 
         # Extract the last DiT-depth hidden states and their corresponding attention masks.
-        # Keep only the assistant response tokens (incl. latent actions) available to DiT cross-attention.
+        # Keep only the user prompt (prefix) available to DiT cross-attention; mask the assistant response.
         fused_attention_mask = ~output["fused_attention_mask"].bool()
         leading_ignore = labels.eq(IGNORE_INDEX).long().cumprod(dim=1).bool()
         assert leading_ignore.shape[1] == fused_attention_mask.shape[1], (
             "Expected labels and fused_attention_mask to have the same sequence length, "
             f"but got labels length {leading_ignore.shape[1]} and fused_attention_mask length {fused_attention_mask.shape[1]}."
         )
-        fused_attention_mask = fused_attention_mask | leading_ignore
+        fused_attention_mask = fused_attention_mask | ~leading_ignore
 
         # extract the cognition feature
         state_features = self.state_proj(state)                                                 # [B, 1, D]
@@ -503,18 +503,12 @@ class CogACT(nn.Module):
             # Construct the messages for the model
             messages = [{"role": "user", "content": content}]
 
-            # Tokenize with add_generation_prompt=True to include the assistant header
-            # so the model can autoregressively generate latent action text.
+            # Tokenize with add_generation_prompt=False to match the training prefix
+            # (user message only — the assistant header is part of the suffix with valid labels).
             inputs = prompt_builder_fn(
-                messages, tokenize=True, add_generation_prompt=True,
-                return_dict=True, return_tensors="pt"
-            )
-
-            prompt_without_assistant = prompt_builder_fn(
                 messages, tokenize=True, add_generation_prompt=False,
                 return_dict=True, return_tensors="pt"
             )
-            assistant_header_start = prompt_without_assistant["input_ids"].shape[1]
 
             input_ids = inputs["input_ids"].to(self.vlm.device)
             attention_mask = inputs["attention_mask"].to(self.vlm.device)
@@ -522,33 +516,19 @@ class CogACT(nn.Module):
             image_grid_thw = inputs["image_grid_thw"].to(self.vlm.device)
             robot_obs_proj = self.state_proj(robot_obs_tensor.to(self.vlm.device))
 
-            # Step 1: Autoregressively generate latent action + action tokens.
-            with torch.autocast("cuda", dtype=autocast_dtype, enabled=self.vlm.enable_mixed_precision_training):
-                gen_output = self.vlm.vlm_backbone.vlm.generate(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    pixel_values=pixel_values,
-                    image_grid_thw=image_grid_thw,
-                    max_new_tokens=512,
-                    do_sample=False,
-                    return_dict_in_generate=True,
-                )
-            full_input_ids = gen_output.sequences
-
-            # Step 2: Re-run a full teacher-forced forward pass over prompt + generated tokens.
-            full_attention_mask = torch.ones_like(full_input_ids, dtype=torch.bool, device=self.vlm.device)
+            # Single forward pass over the user prompt (prefix only).
+            # DiT cross-attention conditions on prefix hidden states directly; no generation needed.
             with torch.autocast("cuda", dtype=autocast_dtype, enabled=self.vlm.enable_mixed_precision_training):
                 output = self.vlm.forward(
-                    input_ids=full_input_ids,
-                    attention_mask=full_attention_mask,
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
                     pixel_values=pixel_values,
                     output_hidden_states=True,
                     image_grid_thw=image_grid_thw,
                 )
 
-            # Step 3: Mask out user prompt while keeping the assistant header and response visible.
+            # Mask only padding positions (no suffix exists at inference time).
             fused_attention_mask = ~output["fused_attention_mask"].bool()
-            fused_attention_mask[:, :assistant_header_start] = True
 
         else:
             # ------------------------------------------------------------------ #

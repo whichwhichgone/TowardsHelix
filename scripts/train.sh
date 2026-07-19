@@ -18,9 +18,9 @@ export WANDB_API_KEY=83793606f810aa3d385ea5d12dbd352514ac54e1
     --vla.learning_rate 1.5e-5 \
     --vla.lr_scheduler_type "linear-warmup+cosine-decay" \
     --vla.epochs 3 \
-    --data_root_dir "/zhaowei/data/flex_vla_data/calvin_abc2d_oe_latact_5dots" \
+    --data_root_dir "/zhaowei/data/flex_vla_data/calvin_abc2d_oe_latact_traj_3dots_hightol" \
     --run_root_dir "./logs" \
-    --run_id "calvin_abc2d_oe_h10_8b_layerwise_flow_statedrop0.8_latact_5dots_tail" \
+    --run_id "calvin_abc2d_oe_h10_8b_layerwise_flow_statedrop0.8_latact_traj_3dots_hightol" \
     --image_aug "False" \
     --wandb_project "nips2026_flex" \
     --wandb_entity "yijiulanpishu" \

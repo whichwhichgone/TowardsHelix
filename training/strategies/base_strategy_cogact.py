@@ -45,18 +45,37 @@ def _draw_latent_action_overlay(img: Image.Image, latent_action) -> Optional[Ima
 
     if points.ndim == 2:
         points = points[None, ...]
-    points = points.reshape(points.shape[0], -1, 2)
-    colors = ["red", "lime", "cyan", "yellow", "magenta", "orange"]
+    points = points.reshape(points.shape[0], -1, 2)  # (T, N, 2)
+    T, N = points.shape[0], points.shape[1]
 
+    timestep_colors = ["red", "orange", "yellow", "lime", "cyan",
+                       "blue", "purple", "magenta", "pink", "green"]
+    track_colors = ["red", "lime", "cyan", "yellow", "magenta", "orange",
+                    "blue", "purple", "pink", "brown"]
+
+    def _to_pixel(x, y):
+        px = int(round(float(x) / 200.0 * overlay.width))
+        py = int(round(float(y) / 200.0 * overlay.height))
+        return max(0, min(overlay.width - 1, px)), max(0, min(overlay.height - 1, py))
+
+    # ── 1) Draw trajectory lines first (under dots) ──
+    for n in range(N):  # each "track": same-index point across timesteps
+        track_color = track_colors[n % len(track_colors)]
+        prev = None
+        for t in range(T):
+            px, py = _to_pixel(points[t, n][0], points[t, n][1])
+            if prev is not None:
+                draw.line([prev, (px, py)], fill=track_color, width=2)
+            prev = (px, py)
+
+    # ── 2) Draw time-step colored dots on top ──
     for timestep, timestep_points in enumerate(points):
-        color = colors[timestep % len(colors)]
+        color = timestep_colors[timestep % len(timestep_colors)]
         for x, y in timestep_points:
-            x = int(round(float(x) / 200.0 * overlay.width))
-            y = int(round(float(y) / 200.0 * overlay.height))
-            x = max(0, min(overlay.width - 1, x))
-            y = max(0, min(overlay.height - 1, y))
+            px, py = _to_pixel(x, y)
             radius = 3
-            draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=color, outline="white")
+            draw.ellipse((px - radius, py - radius, px + radius, py + radius),
+                         fill=color, outline="white")
 
     return overlay
 
