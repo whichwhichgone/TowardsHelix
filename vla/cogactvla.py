@@ -384,7 +384,8 @@ class CogACT(nn.Module):
             **kwargs,
         )
 
-        # Load from Checkpoint if exists
+        # Load the checkpoint once and reuse its state dict for all components.
+        model_state_dict = None
         if pretrained_checkpoint is not None and pretrained_checkpoint.exists():
             model_state_dict = torch.load(pretrained_checkpoint, map_location="cpu")["model"]
             
@@ -392,6 +393,9 @@ class CogACT(nn.Module):
             if "vlm_backbone" in model_state_dict:
                 vlm.vlm_backbone.load_state_dict(model_state_dict["vlm_backbone"])
                 overwatch.info("Loaded vlm_backbone weights from checkpoint.")
+                # load_state_dict copies tensors into the module by default, so release
+                # the largest checkpoint section before constructing CogACT.
+                del model_state_dict["vlm_backbone"]
 
         # Freeze Weights
         if freeze_weights:
@@ -415,10 +419,8 @@ class CogACT(nn.Module):
             lm_loss_weight=lm_loss_weight,
         )
 
-        # Load action model and projector weights from checkpoint
-        if pretrained_checkpoint is not None and pretrained_checkpoint.exists():
-            model_state_dict = torch.load(pretrained_checkpoint, map_location="cpu")["model"]
-            
+        # Load action model and projector weights from the same checkpoint state dict.
+        if model_state_dict is not None:
             if "state_proj" in model_state_dict:
                 try:
                     cogact.state_proj.load_state_dict(model_state_dict["state_proj"])
@@ -446,6 +448,9 @@ class CogACT(nn.Module):
                     cogact.ema_diffusion.load_state_dict(model_state_dict["action_model"])
             else:
                 overwatch.warning("No ActionModel found in the pretrained checkpoint. Initializing a new one.")
+
+            # All checkpoint tensors have now been copied into their modules.
+            del model_state_dict
 
         return cogact        
 
