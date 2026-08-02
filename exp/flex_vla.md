@@ -430,3 +430,287 @@ Success rates for i instructions in a row:
 | push_blue_block_right | 14 / 68 | 20.6% |
 | lift_red_block_drawer | 17 / 18 | 94.4% |
 
+## 实验记录 - 2026-07-31
+
+### 配置来源
+`scripts/serve.sh`
+
+### 实验配置
+- **模型 checkpoint**: `logs/calvin_abc2d_oe_h10_8b_layerwise_flow_statedrop0.8_latact_traj_3dots_stageA2B_unlabel/checkpoints/step-025089-epoch-03-loss=0.7006.pt`
+  - Run 名称: `calvin_abc2d_oe_h10_8b_layerwise_flow_statedrop0.8_latact_traj_3dots_stageA2B_unlabel`
+  - Step: 025089
+  - Epoch: 03
+  - Loss: 0.7006
+- **unnorm-key**: `calvin_abc2d_oe_latact`
+- **future-action-window-size**: 9
+- **推理服务**: `serve/flask_server.py`
+- **GPU 部署**: 8 卡（0-7），每卡启动一个服务进程，端口从 9002 起递增
+
+### 实验结果
+
+**Results for Epoch -1:**
+
+Average successful sequence length: 3.193
+
+Success rates for i instructions in a row:
+
+| i | SR |
+|---|---|
+| 1 | 91.0% |
+| 2 | 76.0% |
+| 3 | 62.0% |
+| 4 | 50.2% |
+| 5 | 40.1% |
+
+**各任务成功率明细:**
+
+| 任务 | 成功/总数 | SR |
+|---|---|---|
+| rotate_blue_block_right | 59 / 66 | 89.4% |
+| move_slider_right | 220 / 221 | 99.5% |
+| lift_red_block_slider | 113 / 118 | 95.8% |
+| turn_off_led | 126 / 127 | 99.2% |
+| push_into_drawer | 69 / 83 | 83.1% |
+| lift_blue_block_drawer | 14 / 14 | 100.0% |
+| lift_pink_block_slider | 110 / 116 | 94.8% |
+| open_drawer | 285 / 289 | 98.6% |
+| lift_pink_block_table | 144 / 149 | 96.6% |
+| push_blue_block_left | 50 / 61 | 82.0% |
+| close_drawer | 165 / 165 | 100.0% |
+| rotate_red_block_right | 58 / 67 | 86.6% |
+| turn_on_led | 139 / 142 | 97.9% |
+| stack_block | 142 / 171 | 83.0% |
+| push_pink_block_right | 25 / 60 | 41.7% |
+| push_red_block_left | 52 / 69 | 75.4% |
+| lift_blue_block_table | 150 / 152 | 98.7% |
+| rotate_blue_block_left | 53 / 59 | 89.8% |
+| place_in_drawer | 164 / 164 | 100.0% |
+| turn_off_lightbulb | 113 / 113 | 100.0% |
+| place_in_slider | 21 / 328 | 6.4% |
+| turn_on_lightbulb | 137 / 137 | 100.0% |
+| move_slider_left | 206 / 206 | 100.0% |
+| push_pink_block_left | 59 / 67 | 88.1% |
+| lift_pink_block_drawer | 11 / 11 | 100.0% |
+| rotate_pink_block_right | 58 / 63 | 92.1% |
+| unstack_block | 57 / 60 | 95.0% |
+| lift_blue_block_slider | 109 / 113 | 96.5% |
+| lift_red_block_table | 141 / 149 | 94.6% |
+| push_red_block_right | 19 / 67 | 28.4% |
+| rotate_pink_block_left | 47 / 49 | 95.9% |
+| rotate_red_block_left | 47 / 56 | 83.9% |
+| lift_red_block_drawer | 15 / 16 | 93.8% |
+| push_blue_block_right | 15 / 64 | 23.4% |
+
+## 实验记录 - 2026-08-01
+
+### 配置来源
+`scripts/serve.sh`
+
+### 实验配置
+- **模型 checkpoint**: `logs/calvin_abc2d_oe_h10_8b_layerwise_flow_statedrop0.8_latact_traj_3dots_stageA2B_unlabel/checkpoints/step-016726-epoch-02-loss=0.2015.pt`
+  - Run 名称: `calvin_abc2d_oe_h10_8b_layerwise_flow_statedrop0.8_latact_traj_3dots_stageA2B_unlabel`
+  - Step: 016726
+  - Epoch: 02
+  - Loss: 0.2015
+- **unnorm-key**: `calvin_abc2d_oe_latact`
+- **future-action-window-size**: 9
+- **推理服务**: `serve/flask_server.py`
+- **GPU 部署**: 8 卡（0-7），每卡启动一个服务进程，端口从 9002 起递增
+
+### 实验结果
+
+**Results for Epoch -1:**
+
+Average successful sequence length: 3.275
+
+Success rates for i instructions in a row:
+
+| i | SR |
+|---|---|
+| 1 | 91.8% |
+| 2 | 78.3% |
+| 3 | 64.5% |
+| 4 | 51.9% |
+| 5 | 41.0% |
+
+**各任务成功率明细:**
+
+| 任务 | 成功/总数 | SR |
+|---|---|---|
+| rotate_blue_block_right | 63 / 68 | 92.6% |
+| move_slider_right | 226 / 227 | 99.6% |
+| lift_red_block_slider | 114 / 120 | 95.0% |
+| turn_off_led | 133 / 135 | 98.5% |
+| push_into_drawer | 76 / 90 | 84.4% |
+| lift_blue_block_drawer | 16 / 16 | 100.0% |
+| lift_pink_block_slider | 113 / 115 | 98.3% |
+| lift_pink_block_table | 150 / 154 | 97.4% |
+| open_drawer | 301 / 302 | 99.7% |
+| push_blue_block_left | 51 / 64 | 79.7% |
+| close_drawer | 165 / 165 | 100.0% |
+| rotate_red_block_right | 62 / 67 | 92.5% |
+| turn_on_led | 146 / 149 | 98.0% |
+| stack_block | 134 / 168 | 79.8% |
+| push_red_block_left | 50 / 67 | 74.6% |
+| lift_blue_block_table | 156 / 157 | 99.4% |
+| rotate_blue_block_left | 58 / 60 | 96.7% |
+| place_in_drawer | 160 / 162 | 98.8% |
+| turn_off_lightbulb | 109 / 110 | 99.1% |
+| place_in_slider | 44 / 342 | 12.9% |
+| turn_on_lightbulb | 136 / 136 | 100.0% |
+| move_slider_left | 210 / 210 | 100.0% |
+| rotate_red_block_left | 49 / 58 | 84.5% |
+| push_pink_block_left | 61 / 71 | 85.9% |
+| lift_red_block_table | 143 / 148 | 96.6% |
+| lift_pink_block_drawer | 10 / 11 | 90.9% |
+| rotate_pink_block_right | 59 / 65 | 90.8% |
+| lift_blue_block_slider | 104 / 112 | 92.9% |
+| unstack_block | 58 / 58 | 100.0% |
+| push_red_block_right | 18 / 68 | 26.5% |
+| rotate_pink_block_left | 46 / 49 | 93.9% |
+| push_pink_block_right | 23 / 61 | 37.7% |
+| lift_red_block_drawer | 15 / 16 | 93.8% |
+| push_blue_block_right | 16 / 64 | 25.0% |
+
+## 实验记录 - 2026-08-02
+
+### 配置来源
+`scripts/serve.sh`
+
+### 实验配置
+- **模型 checkpoint**: `logs/calvin_abc2d_oe_h10_8b_layerwise_flow_statedrop0.8_latact_traj_3dots_stageA(1epoch)2B_unlabel/checkpoints/step-025089-epoch-03-loss=0.4780.pt`
+  - Run 名称: `calvin_abc2d_oe_h10_8b_layerwise_flow_statedrop0.8_latact_traj_3dots_stageA(1epoch)2B_unlabel`
+  - Step: 025089
+  - Epoch: 03
+  - Loss: 0.4780
+- **unnorm-key**: `calvin_abc2d_oe_latact`
+- **future-action-window-size**: 9
+- **推理服务**: `serve/flask_server.py`
+- **GPU 部署**: 8 卡（0-7），每卡启动一个服务进程，端口从 9002 起递增
+
+### 实验结果
+
+**Results for Epoch -1:**
+
+Average successful sequence length: 3.223
+
+Success rates for i instructions in a row:
+
+| i | SR |
+|---|---|
+| 1 | 91.3% |
+| 2 | 77.1% |
+| 3 | 62.5% |
+| 4 | 50.9% |
+| 5 | 40.5% |
+
+**各任务成功率明细:**
+
+| 任务 | 成功/总数 | SR |
+|---|---|---|
+| rotate_blue_block_right | 65 / 68 | 95.6% |
+| move_slider_right | 216 / 217 | 99.5% |
+| lift_red_block_slider | 116 / 118 | 98.3% |
+| turn_off_led | 135 / 138 | 97.8% |
+| push_into_drawer | 71 / 83 | 85.5% |
+| lift_blue_block_drawer | 13 / 13 | 100.0% |
+| lift_pink_block_slider | 113 / 119 | 95.0% |
+| place_in_slider | 31 / 339 | 9.1% |
+| open_drawer | 294 / 295 | 99.7% |
+| lift_pink_block_table | 145 / 148 | 98.0% |
+| move_slider_left | 213 / 213 | 100.0% |
+| push_blue_block_left | 54 / 61 | 88.5% |
+| close_drawer | 159 / 159 | 100.0% |
+| rotate_red_block_right | 64 / 70 | 91.4% |
+| turn_on_led | 136 / 142 | 95.8% |
+| push_red_block_left | 53 / 68 | 77.9% |
+| lift_blue_block_table | 154 / 159 | 96.9% |
+| rotate_blue_block_left | 53 / 58 | 91.4% |
+| place_in_drawer | 164 / 164 | 100.0% |
+| turn_off_lightbulb | 112 / 112 | 100.0% |
+| rotate_red_block_left | 51 / 55 | 92.7% |
+| stack_block | 136 / 168 | 81.0% |
+| push_pink_block_left | 51 / 68 | 75.0% |
+| turn_on_lightbulb | 130 / 130 | 100.0% |
+| lift_red_block_table | 150 / 151 | 99.3% |
+| lift_pink_block_drawer | 13 / 13 | 100.0% |
+| rotate_pink_block_right | 57 / 64 | 89.1% |
+| unstack_block | 58 / 58 | 100.0% |
+| lift_blue_block_slider | 103 / 113 | 91.2% |
+| push_red_block_right | 21 / 68 | 30.9% |
+| rotate_pink_block_left | 39 / 47 | 83.0% |
+| push_pink_block_right | 22 / 59 | 37.3% |
+| lift_red_block_drawer | 15 / 16 | 93.8% |
+| push_blue_block_right | 16 / 64 | 25.0% |
+
+## 实验记录 - 2026-08-02 (2)
+
+### 配置来源
+`scripts/serve.sh`
+
+### 实验配置
+- **模型 checkpoint**: `logs/calvin_abc2d_oe_h10_8b_layerwise_flow_statedrop0.8_latact_traj_3dots_stageA(1epoch)2B_unlabel/checkpoints/step-016726-epoch-02-loss=0.2718.pt`
+  - Run 名称: `calvin_abc2d_oe_h10_8b_layerwise_flow_statedrop0.8_latact_traj_3dots_stageA(1epoch)2B_unlabel`
+  - Step: 016726
+  - Epoch: 02
+  - Loss: 0.2718
+- **unnorm-key**: `calvin_abc2d_oe_latact`
+- **future-action-window-size**: 9
+- **推理服务**: `serve/flask_server.py`
+- **GPU 部署**: 8 卡（0-7），每卡启动一个服务进程，端口从 9002 起递增
+
+### 实验结果
+
+**Results for Epoch -1:**
+
+Average successful sequence length: 3.269
+
+Success rates for i instructions in a row:
+
+| i | SR |
+|---|---|
+| 1 | 91.8% |
+| 2 | 77.3% |
+| 3 | 64.1% |
+| 4 | 52.2% |
+| 5 | 41.5% |
+
+**各任务成功率明细:**
+
+| 任务 | 成功/总数 | SR |
+|---|---|---|
+| rotate_blue_block_right | 65 / 68 | 95.6% |
+| move_slider_right | 227 / 228 | 99.6% |
+| lift_red_block_slider | 114 / 116 | 98.3% |
+| turn_off_led | 130 / 130 | 100.0% |
+| push_into_drawer | 78 / 89 | 87.6% |
+| lift_blue_block_drawer | 15 / 16 | 93.8% |
+| lift_pink_block_slider | 122 / 123 | 99.2% |
+| lift_pink_block_table | 145 / 152 | 95.4% |
+| open_drawer | 291 / 294 | 99.0% |
+| push_blue_block_left | 55 / 61 | 90.2% |
+| close_drawer | 165 / 165 | 100.0% |
+| rotate_red_block_right | 59 / 67 | 88.1% |
+| turn_on_led | 143 / 149 | 96.0% |
+| push_red_block_left | 57 / 67 | 85.1% |
+| lift_blue_block_table | 153 / 154 | 99.4% |
+| rotate_blue_block_left | 60 / 60 | 100.0% |
+| place_in_drawer | 166 / 166 | 100.0% |
+| turn_off_lightbulb | 120 / 120 | 100.0% |
+| place_in_slider | 22 / 346 | 6.4% |
+| turn_on_lightbulb | 134 / 135 | 99.3% |
+| move_slider_left | 205 / 205 | 100.0% |
+| rotate_red_block_left | 49 / 55 | 89.1% |
+| stack_block | 139 / 172 | 80.8% |
+| push_pink_block_left | 58 / 69 | 84.1% |
+| lift_red_block_table | 146 / 149 | 98.0% |
+| lift_pink_block_drawer | 14 / 14 | 100.0% |
+| rotate_pink_block_right | 60 / 62 | 96.8% |
+| unstack_block | 55 / 55 | 100.0% |
+| lift_blue_block_slider | 113 / 115 | 98.3% |
+| push_red_block_right | 20 / 68 | 29.4% |
+| rotate_pink_block_left | 40 / 49 | 81.6% |
+| push_pink_block_right | 20 / 58 | 34.5% |
+| lift_red_block_drawer | 16 / 16 | 100.0% |
+| push_blue_block_right | 13 / 61 | 21.3% |
+
