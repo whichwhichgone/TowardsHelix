@@ -422,7 +422,7 @@ class TrainingStrategy(ABC):
         save_interval: int = 2500,
         save_full_model: bool = True,
         action_model: bool = True,
-        latent_action_viz_interval: int = 100,
+        latent_action_viz_interval: int = 1000,
     ) -> None:
         """Run the VLA training loop for the given `dataset` and `collator`; log losses, action metrics to `metrics`."""
         assert isinstance(vla_dataset, IterableDataset), "VLA training expects an IterableDataset!"

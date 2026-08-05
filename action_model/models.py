@@ -140,7 +140,7 @@ class CrossAttention(nn.Module):
             (B, N, C) tensor
         """
         x_norm = self.norm(x)
-        out, _ = self.attn(x_norm, context, context, key_padding_mask=context_mask)
+        out, _ = self.attn(x_norm, context, context, key_padding_mask=context_mask, need_weights=False)
         return out
 
 class DiTBlock(nn.Module):

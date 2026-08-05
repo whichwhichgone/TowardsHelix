@@ -87,7 +87,7 @@ class TrainConfig:
     #trackers: Tuple[str, ...] = ("jsonl",)                         # Trackers to initialize (if W&B, add config!)
     wandb_project: str = ""                                         # Name of W&B project to log to (use default!)
     wandb_entity: str = ""                                          # Name of entity to log under
-    latent_action_viz_interval: int = 100                            # Interval for logging latent action overlays to W&B (0 disables)
+    latent_action_viz_interval: int = 1000                            # Interval for logging latent action overlays to W&B (0 disables)
     repeated_diffusion_steps: int = 8                               # Repeated steps for training action model (a diffusion model)
     load_all_data_for_training: bool = True                         # Load all training data 
     future_action_window_size: int = 15                             # Action chunking, predicting future actions + current action
