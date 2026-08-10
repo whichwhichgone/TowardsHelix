@@ -226,7 +226,7 @@ def train(cfg: TrainConfig) -> None:
 
     # [Explicit] Call to `freeze_backbones` here for clarity =>> will log exactly what is/is not frozen
     overwatch.info(f"Invoking `VLM.freeze_backbones()` for `{vla_id}` => Stage: `{stage}`")
-    vla.freeze_backbones(stage)
+    vla.freeze_backbones(stage, trainable_last_llm_layers=cfg.vla.trainable_last_llm_layers)
 
     # Print number of total/trainable model parameters
     num_params = sum(p.numel() for p in vla.parameters())

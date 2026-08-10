@@ -54,6 +54,9 @@ class VLAConfig(ChoiceRegistry):
     enable_mixed_precision_training: bool = True    # Enable Traditional BF16 Mixed Precision
     reduce_in_full_precision: bool = True           # Accumulate/Reduce All-Gather Gradients in FP32 Full Precision
 
+    # Optional partial fine-tuning for end-to-end LLM backbones
+    trainable_last_llm_layers: Optional[int] = None # Train only the last N LLM decoder layers when set
+
     # fmt: on
 
 

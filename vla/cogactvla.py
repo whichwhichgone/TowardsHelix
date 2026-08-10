@@ -110,8 +110,14 @@ class CogACT(nn.Module):
             return None  # End-to-end VLMs don't have separate vision backbone
         return self.vlm.vision_backbone
     
-    def freeze_backbones(self, stage):
-        self.vlm.freeze_backbones(stage)
+    def freeze_backbones(self, stage, trainable_last_llm_layers: Optional[int] = None):
+        if trainable_last_llm_layers is not None and not self.e2e_vlm:
+            raise ValueError("`trainable_last_llm_layers` is only supported for end-to-end VLMs.")
+
+        if self.e2e_vlm:
+            self.vlm.freeze_backbones(stage, trainable_last_llm_layers=trainable_last_llm_layers)
+        else:
+            self.vlm.freeze_backbones(stage)
 
     def _build_vlm_kwargs(
         self,

@@ -89,10 +89,6 @@ class Qwen3VLBackbone(VLMBackbone):
         # Set cache mode
         self.vlm.config.use_cache = self.inference_mode
         
-        # Enable input requires grad for gradient checkpointing
-        if not self.inference_mode:
-            self.vlm.enable_input_require_grads()
-        
         # Load processor (handles both tokenization and image processing)
         overwatch.info(
             f"Loading [bold]{self.vlm_family}[/] Processor via AutoProcessor",

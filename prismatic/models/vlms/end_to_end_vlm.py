@@ -114,12 +114,15 @@ class EndToEndVLM(nn.Module, GenerationMixin):
         prompt_initializer: Type[PromptBuilder] = self.vlm_backbone.prompt_builder_fn
         return prompt_initializer(self.model_family, system_prompt=system_prompt)
 
-    def freeze_backbones(self, stage: str) -> None:
+    def freeze_backbones(self, stage: str, trainable_last_llm_layers: Optional[int] = None) -> None:
         """
         Set requires_grad_ on component modules based on training stage.
         
         For end-to-end VLMs, we treat the entire vlm_backbone as a single unit.
         """
+        if trainable_last_llm_layers is not None and stage != "finetune":
+            raise ValueError("`trainable_last_llm_layers` requires the `finetune` stage.")
+
         if stage == "align":
             # For end-to-end VLMs, "align" doesn't apply since there's no separate projector
             # We freeze everything
@@ -127,6 +130,32 @@ class EndToEndVLM(nn.Module, GenerationMixin):
             self.trainable_module_keys = []
             self.vision_backbone_requires_grad = False
             overwatch.info(f"[Frozen] 🥶 =>> VLM Backbone `{self.vlm_backbone.identifier}`", ctx_level=1)
+
+        elif stage == "finetune" and trainable_last_llm_layers is not None:
+            language_model = getattr(getattr(self.vlm_backbone.vlm, "model", None), "language_model", None)
+            if language_model is None or not hasattr(language_model, "layers"):
+                raise ValueError("`trainable_last_llm_layers` is only supported for Qwen-style language models.")
+
+            decoder_layers = language_model.layers
+            num_layers = len(decoder_layers)
+            if not 1 <= trainable_last_llm_layers <= num_layers:
+                raise ValueError(
+                    f"`trainable_last_llm_layers` must be in [1, {num_layers}], "
+                    f"but got {trainable_last_llm_layers}."
+                )
+
+            self.vlm_backbone.requires_grad_(False)
+            for decoder_layer in decoder_layers[-trainable_last_llm_layers:]:
+                decoder_layer.requires_grad_(True)
+
+            self.trainable_module_keys = ["vlm_backbone"]
+            self.vision_backbone_requires_grad = False
+            first_trainable_layer = num_layers - trainable_last_llm_layers
+            overwatch.info(
+                f"[PARTIALLY TRAINABLE] 🔥 =>> LLM decoder layers [{first_trainable_layer}, {num_layers - 1}] "
+                f"({trainable_last_llm_layers}/{num_layers}); all other VLM parameters are frozen",
+                ctx_level=1,
+            )
 
         elif stage == "finetune":
             # Finetune the entire VLM
