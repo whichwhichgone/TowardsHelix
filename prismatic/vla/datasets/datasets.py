@@ -346,7 +346,7 @@ class RLDSBatchTransformOeQwenVL3(RLDSBatchTransformOe):
 
         # Tokenize using QwenVL3's processor
         # For single arm setting (default use the right arm), the left image and right image are the same
-        obs_imgs = [img_scene, img_left]
+        obs_imgs = [img_scene]
         qwen_input, assistant_token_count = self.oelang_to_qwen_input(obs_imgs, oe_lang, mm_utils, action, latent_action)
         input_ids = qwen_input["input_ids"]                                                 # shape: [1, seq_len]
         labels = input_ids.detach().clone()                                                 # shape: [1, seq_len]

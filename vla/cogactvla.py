@@ -494,8 +494,8 @@ class CogACT(nn.Module):
             prompt_builder_fn = self.vlm.vlm_backbone.prompt_builder_fn
             autocast_dtype = self.vlm.vlm_backbone.half_precision_dtype
 
-            img_scene, image_hand_left = image["scene"], image["left"]
-            img_obs = [img_scene, image_hand_left]            
+            img_scene = image["scene"]
+            img_obs = [img_scene]
             mm_utils = img_obs + utils
 
             # Build multimodal instruction string with <oe> placeholders
