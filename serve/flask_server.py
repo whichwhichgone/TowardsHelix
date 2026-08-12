@@ -27,6 +27,7 @@ class VLAServer:
             action_model_type=args.action_model_type,
             future_action_window_size=args.future_action_window_size,
         )
+        self.vla = self.vla.to("cuda:0").eval()
         self.prompt_builder_fn = self.vla.vlm.vlm_backbone.prompt_builder_fn
 
     def compose_input(
@@ -87,7 +88,6 @@ class VLAServer:
 
     def generate_action(self, img_obs, img_utils, oe_lang, robot_obs):
         with torch.inference_mode():
-            self.vla.to("cuda:0").eval()
             actions, _ = self.vla.predict_action(
                 img_obs,
                 img_utils,
