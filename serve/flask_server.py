@@ -68,11 +68,11 @@ class VLAServer:
                 random_image = Image.fromarray(random_array)
                 img_utils = [random_image]
         elif self.instruction_type == "goal_image":
-            oe_lang = "reach the goal state <oe>"
+            oe_lang = "Reach the goal state in <oe>.".lower()
             assert goal_img_static is not None, "goal_img_static should be provided for goal_image instruction type!"
             img_utils = goal_img_static
         elif self.instruction_type == "imitation_video":
-            oe_lang = "learn the video demo: <oe>,<oe>,<oe>,<oe>"
+            oe_lang = "Follow the actions in <oe>,<oe>,<oe>,<oe>.".lower()
             assert video_static is not None, "video_static should be provided for imitation_video instruction type!"
             img_utils = video_static
         elif self.instruction_type == "ins_image":
@@ -80,8 +80,13 @@ class VLAServer:
             assert ins_image is not None, "ins_image should be provided for ins_image instruction type!"
             img_utils = ins_image
         else:
-            oe_lang = instruction
-            img_utils = []
+            oe_lang = instruction.lower()
+
+            # To be consistent with forward() in the training stage,
+            # the random image is used to support FSDP training of the non-end2end model.
+            random_array = np.random.randint(0, 256, (224, 224, 3), dtype=np.uint8)
+            random_image = Image.fromarray(random_array)
+            img_utils = [random_image]
 
         img_obs = {"scene": img_static, "left": img_gripper}
         return img_obs, img_utils, oe_lang
